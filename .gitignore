@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────
+# OS cruft
+# ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ─────────────────────────────────────────
+# IDE / Editors
+# ─────────────────────────────────────────
+.vs/
+.vscode/
+.idea/
+*.iml
+*.DotSettings.user
+
+# ─────────────────────────────────────────
+# Unreal Engine (plugin repo)
+# ─────────────────────────────────────────
+# Build artifacts & caches
+Binaries/
+Intermediate/
+DerivedDataCache/
+Saved/
+# Catch nested plugin artifacts too (si repo mono-plugins ou multi-plugins)
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+Plugins/**/DerivedDataCache/
+Plugins/**/Saved/
+
+# Logs, reports, autosaves
+Saved/Logs/
+Saved/Autosaves/
+*.log
+*.dmp
+*.mdmp
+
+# UBT/Generated files
+# (Les .generated.h/.gen.cpp sont recréés par UHT/UBT)
+*.generated.h
+*.generated.cpp
+*.gen.cpp
+
+# ─────────────────────────────────────────
+# Project files générés
+# ─────────────────────────────────────────
+# Solutions/Projets (générés par Unreal / IDE)
+*.sln
+*.suo
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+*.xcuserstate
+*.xcuserdata/
+
+# ─────────────────────────────────────────
+# Binaires packagés / distribution
+# ─────────────────────────────────────────
+# (si vous exportez des builds de démo depuis le repo)
+*.exe
+*.dll
+*.pdb
+*.app
+*.ipa
+*.apk
+*.aab
+*.pak
+
+# ─────────────────────────────────────────
+# CMake / Ninja (si jamais utilisés localement)
+# ─────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+build/
+out/
