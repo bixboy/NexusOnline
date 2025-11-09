@@ -4,27 +4,33 @@
 	"Category": "",
 	"Description": "",
 	"Modules": [
-		{
-			"Name": "NexusOnline",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		}
+      {
+        "Name": "NexusOnline",
+        "Type": "Runtime",
+        "LoadingPhase": "Default"
+      }
 	],
 	"Plugins": [
-		{
-			"Name": "ModelingToolsEditorMode",
-			"Enabled": true,
-			"TargetAllowList": [
-				"Editor"
-			]
-		},
-		{
-			"Name": "LevelSelection",
-			"Enabled": true
-		},
-		{
-			"Name": "OnlineSubsystemSteam",
-			"Enabled": true
-		}
+      {
+        "Name": "ModelingToolsEditorMode",
+        "Enabled": true,
+        "TargetAllowList": ["Editor"]
+      },
+      {
+        "Name": "LevelSelection",
+        "Enabled": true
+      },
+      {
+        "Name": "OnlineSubsystemSteam",
+        "Enabled": true
+      },
+      {
+        "Name": "OnlineSubsystem",
+        "Enabled": true
+      },
+      {
+        "Name": "OnlineSubsystemUtils",
+        "Enabled": true
+      }
 	]
 }
