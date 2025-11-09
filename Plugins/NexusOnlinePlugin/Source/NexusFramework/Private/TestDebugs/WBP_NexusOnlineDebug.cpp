@@ -143,6 +143,10 @@ void UWBP_NexusOnlineDebug::UpdateSessionInfo()
                                 MaxPlayers = RetrievedMaxPlayers;
                                 const int32 OpenCount = FMath::Max(0, MaxPlayers - CurrentPlayers);
                                 UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Session: %s (%d/%d players registered, %d open slots)"), *CurrentSessionName, CurrentPlayers, MaxPlayers, OpenCount);
+                                if (Text_SessionInfo)
+                                {
+                                        Text_SessionInfo->SetText(GetSessionInfoText());
+                                }
                         }
                         else
                         {
@@ -151,15 +155,23 @@ void UWBP_NexusOnlineDebug::UpdateSessionInfo()
                                 const int32 OpenCount = FMath::Max(0, MaxPlayers - CurrentPlayers);
                                 UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] Fallback session info used for %s."), *CurrentSessionName);
                                 UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Session: %s (%d/%d players registered, %d open slots)"), *CurrentSessionName, CurrentPlayers, MaxPlayers, OpenCount);
+                                if (Text_SessionInfo)
+                                {
+                                        Text_SessionInfo->SetText(GetSessionInfoText());
+                                }
                         }
                         return;
                 }
         }
 
-	CurrentSessionName = TEXT("No session active");
-	CurrentPlayers = 0;
-	MaxPlayers = 0;
-	UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] No active session."));
+        CurrentSessionName = TEXT("No session active");
+        CurrentPlayers = 0;
+        MaxPlayers = 0;
+        UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] No active session."));
+        if (Text_SessionInfo)
+        {
+                Text_SessionInfo->SetText(GetSessionInfoText());
+        }
 }
 
 FText UWBP_NexusOnlineDebug::GetSessionInfoText() const
