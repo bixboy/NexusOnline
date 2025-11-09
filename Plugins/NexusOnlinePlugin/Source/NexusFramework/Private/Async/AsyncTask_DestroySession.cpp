@@ -1,82 +1,92 @@
-﻿#include "Async/AsyncTask_DestroySession.h"
-#include "Utils/NexusOnlineHelpers.h"
+#include "Async/AsyncTask_DestroySession.h"
+
+#include "Engine/Engine.h"
+#include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
-#include "Interfaces/OnlineSessionInterface.h"
+#include "Utils/NexusOnlineHelpers.h"
 
 UAsyncTask_DestroySession* UAsyncTask_DestroySession::DestroySession(UObject* WorldContextObject, ENexusSessionType SessionType)
 {
-    UAsyncTask_DestroySession* Node = NewObject<UAsyncTask_DestroySession>();
-	Node->WorldContextObject = WorldContextObject;
-    Node->TargetSessionType = SessionType;
-	
-    return Node;
+        UAsyncTask_DestroySession* Node = NewObject<UAsyncTask_DestroySession>();
+        Node->WorldContextObject = WorldContextObject;
+        Node->TargetSessionType = SessionType;
+
+        return Node;
 }
 
 void UAsyncTask_DestroySession::Activate()
 {
-	if (!WorldContextObject)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Invalid WorldContextObject in DestroySession"));
-		
-		OnFailure.Broadcast();
-		return;
-	}
-	
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-    if (!World)
-    {
-        OnFailure.Broadcast();
-        return;
-    }
+        if (!WorldContextObject)
+        {
+                UE_LOG(LogNexusOnline, Error, TEXT("DestroySession failed: invalid WorldContextObject."));
 
-    IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-    if (!Session.IsValid())
-    {
-        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] DestroySession failed: no valid OnlineSubsystem."));
-    	
-        OnFailure.Broadcast();
-        return;
-    }
+                OnFailure.Broadcast();
+                return;
+        }
 
-    const FName InternalSessionName = NexusOnline::SessionTypeToName(TargetSessionType);
+        UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+        if (!World)
+        {
+                OnFailure.Broadcast();
+                return;
+        }
 
-    if (!Session->GetNamedSession(InternalSessionName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] DestroySession: '%s' does not exist."), *InternalSessionName.ToString());
-    	
-        OnFailure.Broadcast();
-        return;
-    }
+        IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+        if (!Session.IsValid())
+        {
+                UE_LOG(LogNexusOnline, Error, TEXT("DestroySession failed: session interface unavailable."));
 
-    DestroyDelegateHandle = Session->AddOnDestroySessionCompleteDelegate_Handle
-	(
-        FOnDestroySessionCompleteDelegate::CreateUObject(this, &UAsyncTask_DestroySession::OnDestroySessionComplete)
-    );
+                OnFailure.Broadcast();
+                return;
+        }
 
-    UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Destroying session: %s"), *InternalSessionName.ToString());
+        const FName InternalSessionName = NexusOnline::SessionTypeToName(TargetSessionType);
 
-    if (!Session->DestroySession(InternalSessionName))
-    {
-        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] DestroySession() call failed immediately."));
-    	
-        Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);
-        OnFailure.Broadcast();
-    }
+        if (!Session->GetNamedSession(InternalSessionName))
+        {
+                UE_LOG(LogNexusOnline, Warning, TEXT("DestroySession aborted: '%s' does not exist."), *InternalSessionName.ToString());
+
+                OnFailure.Broadcast();
+                return;
+        }
+
+        DestroyDelegateHandle = Session->AddOnDestroySessionCompleteDelegate_Handle(
+                FOnDestroySessionCompleteDelegate::CreateUObject(this, &UAsyncTask_DestroySession::OnDestroySessionComplete)
+        );
+
+        UE_LOG(LogNexusOnline, Log, TEXT("Destroying session '%s'"), *InternalSessionName.ToString());
+
+        if (!Session->DestroySession(InternalSessionName))
+        {
+                UE_LOG(LogNexusOnline, Error, TEXT("DestroySession call failed immediately."));
+
+                Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);
+                OnFailure.Broadcast();
+        }
 }
 
 void UAsyncTask_DestroySession::OnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
 {
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-    IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-	
-    if (Session.IsValid())
-    {
-        Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);
-    }
+        UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+        IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
 
-    UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Session '%s' destruction result: %s"), *SessionName.ToString(),
-        bWasSuccessful ? TEXT("SUCCESS") : TEXT("FAILURE"));
+        if (Session.IsValid())
+        {
+                Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);
+        }
 
-    (bWasSuccessful ? OnSuccess : OnFailure).Broadcast();
+        UE_LOG(LogNexusOnline, Log, TEXT("Session '%s' destruction result: %s"), *SessionName.ToString(),
+                bWasSuccessful ? TEXT("SUCCESS") : TEXT("FAILURE"));
+
+        if (bWasSuccessful)
+        {
+                NexusOnline::StopTrackingSession(World);
+                NexusOnline::BroadcastSessionPlayersChanged(World, TargetSessionType);
+                OnSuccess.Broadcast();
+        }
+        else
+        {
+                OnFailure.Broadcast();
+        }
 }

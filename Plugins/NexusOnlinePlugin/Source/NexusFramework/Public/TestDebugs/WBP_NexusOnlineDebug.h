@@ -34,8 +34,8 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Nexus|Online")
 	int32 SelectedSessionIndex = 0;
 
-	UPROPERTY(BlueprintReadOnly, Category="Nexus|Online")
-	FString CurrentSessionName = TEXT("No session");
+UPROPERTY(BlueprintReadOnly, Category="Nexus|Online")
+FString CurrentSessionName = TEXT("No session active");
 
 	UPROPERTY(BlueprintReadOnly, Category="Nexus|Online")
 	int32 CurrentPlayers = 0;
@@ -43,12 +43,13 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Nexus|Online")
 	int32 MaxPlayers = 0;
 
-	//  Overrides
-	virtual void NativeConstruct() override;
+//  Overrides
+virtual void NativeConstruct() override;
+        virtual void NativeDestruct() override;
 
-	//  Boutons
-	UFUNCTION()
-	void OnCreateClicked();
+//  Boutons
+UFUNCTION()
+void OnCreateClicked();
 
 	UFUNCTION()
 	void OnJoinClicked();
@@ -75,13 +76,17 @@ public:
 	UFUNCTION()
 	void OnLeaveSuccess();
 
-	UFUNCTION()
-	void OnLeaveFailure();
+UFUNCTION()
+void OnLeaveFailure();
 
-	UFUNCTION()
-	void UpdateSessionInfo();
+//  UI helpers
+UFUNCTION(BlueprintCallable, Category="Nexus|Online")
+FText GetSessionInfoText() const;
 
-	//  UI helpers
-	UFUNCTION(BlueprintCallable, Category="Nexus|Online")
-	FText GetSessionInfoText() const;
+private:
+void HandleSessionPlayersChanged(UWorld* InWorld, ENexusSessionType SessionType, FName SessionName, int32 CurrentPlayersValue, int32 MaxPlayersValue);
+void ApplyActiveSession(const FString& SessionLabel, int32 CurrentPlayersValue, int32 MaxPlayersValue);
+void ApplyNoSession();
+
+        FDelegateHandle PlayersChangedHandle;
 };

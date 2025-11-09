@@ -1,97 +1,96 @@
-﻿#include "Async/AsyncTask_CreateSession.h"
-#include "OnlineSubsystem.h"
-#include "OnlineSessionSettings.h"
-#include "Interfaces/OnlineSessionInterface.h"
+#include "Async/AsyncTask_CreateSession.h"
+
+#include "Engine/Engine.h"
 #include "Interfaces/OnlineIdentityInterface.h"
-#include "OnlineSubsystemTypes.h"
+#include "Interfaces/OnlineSessionInterface.h"
+#include "OnlineSessionSettings.h"
+#include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
 #include "Utils/NexusOnlineHelpers.h"
 
-
 UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(UObject* WorldContextObject, const FSessionSettingsData& SettingsData)
 {
-    UAsyncTask_CreateSession* Node = NewObject<UAsyncTask_CreateSession>();
-	Node->WorldContextObject = WorldContextObject;
-    Node->Data = SettingsData;
-	
-    return Node;
+        UAsyncTask_CreateSession* Node = NewObject<UAsyncTask_CreateSession>();
+        Node->WorldContextObject = WorldContextObject;
+        Node->Data = SettingsData;
+
+        return Node;
 }
 
 void UAsyncTask_CreateSession::Activate()
 {
-	if (!WorldContextObject)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Invalid WorldContextObject in CreateSession"));
-		
-		OnFailure.Broadcast();
-		return;
-	}
-	
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-    if (!World)
-    {
-        OnFailure.Broadcast();
-        return;
-    }
+        if (!WorldContextObject)
+        {
+                UE_LOG(LogNexusOnline, Error, TEXT("CreateSession failed: invalid WorldContextObject."));
 
-	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-    if (!Session.IsValid())
-    {
-        OnFailure.Broadcast();
-        return;
-    }
+                OnFailure.Broadcast();
+                return;
+        }
 
-    const FName InternalSessionName = NexusOnline::SessionTypeToName(Data.SessionType);
-    if (Session->GetNamedSession(InternalSessionName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Existing %s found, destroying before recreation."), *InternalSessionName.ToString());
-        Session->DestroySession(InternalSessionName);
-    }
+        UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+        if (!World)
+        {
+                OnFailure.Broadcast();
+                return;
+        }
 
-    // Création des paramètres
-    FOnlineSessionSettings Settings;
-    Settings.bIsLANMatch = Data.bIsLAN;
-    Settings.bShouldAdvertise = !Data.bIsPrivate;
-    Settings.bUsesPresence = true;
-    Settings.bAllowJoinInProgress = true;
-    Settings.NumPublicConnections = Data.MaxPlayers;
+        IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+        if (!Session.IsValid())
+        {
+                UE_LOG(LogNexusOnline, Error, TEXT("CreateSession failed: no session interface available."));
 
-    // Paramètres exposés pour le FindSessions
-    Settings.Set("SESSION_DISPLAY_NAME", Data.SessionName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-    Settings.Set("MAP_NAME_KEY", Data.MapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-    Settings.Set("GAME_MODE_KEY", Data.GameMode, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-    Settings.Set("SESSION_TYPE_KEY", InternalSessionName.ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings.Set("USES_PRESENCE", true, EOnlineDataAdvertisementType::ViaOnlineService);
+                OnFailure.Broadcast();
+                return;
+        }
 
-    CreateDelegateHandle = Session->AddOnCreateSessionCompleteDelegate_Handle
-	(
-        FOnCreateSessionCompleteDelegate::CreateUObject(this, &UAsyncTask_CreateSession::OnCreateSessionComplete)
-    );
+        const FName InternalSessionName = NexusOnline::SessionTypeToName(Data.SessionType);
+        if (Session->GetNamedSession(InternalSessionName))
+        {
+                UE_LOG(LogNexusOnline, Warning, TEXT("Existing session '%s' detected. Destroying before recreation."), *InternalSessionName.ToString());
+                Session->DestroySession(InternalSessionName);
+        }
 
-    UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Creating %s (Display: %s)"), *InternalSessionName.ToString(), *Data.SessionName);
-    Session->CreateSession(0, InternalSessionName, Settings);
+        FOnlineSessionSettings Settings;
+        Settings.bIsLANMatch = Data.bIsLAN;
+        Settings.bShouldAdvertise = !Data.bIsPrivate;
+        Settings.bUsesPresence = true;
+        Settings.bAllowJoinInProgress = true;
+        Settings.NumPublicConnections = Data.MaxPlayers;
+
+        Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+        Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+        Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+        Settings.Set(TEXT("SESSION_TYPE_KEY"), InternalSessionName.ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+        Settings.Set(TEXT("USES_PRESENCE"), true, EOnlineDataAdvertisementType::ViaOnlineService);
+
+        CreateDelegateHandle = Session->AddOnCreateSessionCompleteDelegate_Handle(
+                FOnCreateSessionCompleteDelegate::CreateUObject(this, &UAsyncTask_CreateSession::OnCreateSessionComplete)
+        );
+
+        UE_LOG(LogNexusOnline, Log, TEXT("Creating session '%s' (Display: %s)"), *InternalSessionName.ToString(), *Data.SessionName);
+        Session->CreateSession(0, InternalSessionName, Settings);
 }
 
 void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool bWasSuccessful)
 {
-	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-	
-    if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World))
-    {
-        Session->ClearOnCreateSessionCompleteDelegate_Handle(CreateDelegateHandle);
-    }
+        UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
 
-	UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Session '%s' creation result: %s"), *SessionName.ToString(), 
-		bWasSuccessful ? TEXT("SUCCESS") : TEXT("FAILURE"));
+        if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World))
+        {
+                Session->ClearOnCreateSessionCompleteDelegate_Handle(CreateDelegateHandle);
+        }
 
-	if (bWasSuccessful)
-	{
-		IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-		IOnlineIdentityPtr Identity = Online::GetIdentityInterface(World);
+        UE_LOG(LogNexusOnline, Log, TEXT("Session '%s' creation result: %s"), *SessionName.ToString(),
+                bWasSuccessful ? TEXT("SUCCESS") : TEXT("FAILURE"));
 
-		if (Session.IsValid() && Identity.IsValid())
-		{
-			TSharedPtr<const FUniqueNetId> LocalUserId = Identity->GetUniquePlayerId(0);
+        if (bWasSuccessful)
+        {
+                IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+                IOnlineIdentityPtr Identity = Online::GetIdentityInterface(World);
+
+                if (Session.IsValid() && Identity.IsValid())
+                {
+                        TSharedPtr<const FUniqueNetId> LocalUserId = Identity->GetUniquePlayerId(0);
                         if (LocalUserId.IsValid())
                         {
                                 Session->RegisterLocalPlayer(*LocalUserId, SessionName, FOnRegisterLocalPlayerCompleteDelegate());
@@ -101,21 +100,27 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
                                 {
                                         if (FNamedOnlineSession* LocalSession = Session->GetNamedSession(SessionName))
                                         {
-                                                const FUniqueNetIdRepl NetIdRepl(LocalUserId);
-                                                LocalSession->RegisteredPlayers.AddUnique(NetIdRepl);
-                                                UE_LOG(LogTemp, Verbose, TEXT("[NexusOnline] RegisterPlayer failed during creation, manually appended local user."));
+                                                const TSharedRef<const FUniqueNetId> LocalUserRef = LocalUserId.ToSharedRef();
+                                                LocalSession->RegisteredPlayers.AddUnique(LocalUserRef);
+                                                UE_LOG(LogNexusOnline, Verbose, TEXT("RegisterPlayer failed during creation, manually appended local user."));
                                         }
                                 }
 
-                                UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Local player registered to session. RegisterPlayer result: %s"),
+                                UE_LOG(LogNexusOnline, Log, TEXT("Local player registered to session. RegisterPlayer result: %s"),
                                        bRegisterResult ? TEXT("Success") : TEXT("Failure"));
                         }
-		}
+                        else
+                        {
+                                UE_LOG(LogNexusOnline, Warning, TEXT("Local player registration skipped: invalid unique net id."));
+                        }
+                }
 
-		OnSuccess.Broadcast();
-	}
-	else
-	{
-		OnFailure.Broadcast();
-	}
+                NexusOnline::BeginTrackingSession(World);
+                NexusOnline::BroadcastSessionPlayersChanged(World, Data.SessionType);
+                OnSuccess.Broadcast();
+        }
+        else
+        {
+                OnFailure.Broadcast();
+        }
 }
