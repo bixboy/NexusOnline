@@ -21,14 +21,13 @@ void UAsyncTask_CreateSession::Activate()
 {
     if (!WorldContextObject)
     {
-        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Invalid WorldContextObject in CreateSession"));
-        OnFailure.Broadcast();
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Null WorldContextObject in CreateSession, attempting fallback world."));
     }
 
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+    UWorld* World = GetWorldSafe();
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Unable to resolve a valid world for CreateSession."));
         OnFailure.Broadcast();
         return;
     }
@@ -71,7 +70,13 @@ void UAsyncTask_CreateSession::Activate()
 
 void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool bWasSuccessful)
 {
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+    UWorld* World = GetWorldSafe();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] World invalid on OnCreateSessionComplete."));
+        OnFailure.Broadcast();
+        return;
+    }
 
     IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
     if (Session.IsValid())
@@ -156,5 +161,21 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
 
     OnSuccess.Broadcast();
     UGameplayStatics::OpenLevel(World, FName(*Data.MapName), true, TEXT("listen"));
+}
+
+UWorld* UAsyncTask_CreateSession::GetWorldSafe()
+{
+    if (CachedWorld.IsValid())
+    {
+        return CachedWorld.Get();
+    }
+
+    if (UWorld* World = NexusOnline::ResolveWorld(WorldContextObject))
+    {
+        CachedWorld = World;
+        return World;
+    }
+
+    return nullptr;
 }
 

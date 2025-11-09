@@ -17,17 +17,15 @@ UAsyncTask_DestroySession* UAsyncTask_DestroySession::DestroySession(UObject* Wo
 
 void UAsyncTask_DestroySession::Activate()
 {
-	if (!WorldContextObject)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Invalid WorldContextObject in DestroySession"));
-		
-		OnFailure.Broadcast();
-		return;
-	}
-	
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+    if (!WorldContextObject)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Null WorldContextObject in DestroySession, attempting fallback world."));
+    }
+
+    UWorld* World = NexusOnline::ResolveWorld(WorldContextObject);
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Unable to resolve world in DestroySession."));
         OnFailure.Broadcast();
         return;
     }
@@ -69,9 +67,15 @@ void UAsyncTask_DestroySession::Activate()
 
 void UAsyncTask_DestroySession::OnDestroySessionComplete(FName SessionName, bool bWasSuccessful)
 {
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+    UWorld* World = NexusOnline::ResolveWorld(WorldContextObject);
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] World invalid during OnDestroySessionComplete."));
+        OnFailure.Broadcast();
+        return;
+    }
     IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-	
+
     if (Session.IsValid())
     {
         Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);

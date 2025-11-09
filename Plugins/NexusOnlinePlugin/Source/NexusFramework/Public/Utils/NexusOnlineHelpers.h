@@ -3,6 +3,9 @@
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
 #include "Types/OnlineSessionData.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/World.h"
 
 namespace NexusOnline
 {
@@ -68,11 +71,47 @@ namespace NexusOnline
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlineExternalUIPtr GetExternalUIInterface(UWorld* World)
-	{
-		if (IOnlineSubsystem* Subsystem = GetSubsystem(World))
-			return Subsystem->GetExternalUIInterface();
-		
-		return nullptr;
-	}
+        static FORCEINLINE IOnlineExternalUIPtr GetExternalUIInterface(UWorld* World)
+        {
+                if (IOnlineSubsystem* Subsystem = GetSubsystem(World))
+                        return Subsystem->GetExternalUIInterface();
+
+                return nullptr;
+        }
+
+        //───────────────────────────────────────────────
+        // 🔹 World resolution helper (handles standalone mode)
+        //───────────────────────────────────────────────
+        static FORCEINLINE UWorld* ResolveWorld(UObject* WorldContextObject)
+        {
+                if (GEngine)
+                {
+                        if (WorldContextObject)
+                        {
+                                if (UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull))
+                                {
+                                        return World;
+                                }
+                        }
+
+                        if (UGameViewportClient* Viewport = GEngine->GameViewport)
+                        {
+                                if (UWorld* ViewportWorld = Viewport->GetWorld())
+                                {
+                                        return ViewportWorld;
+                                }
+                        }
+
+                        const TIndirectArray<FWorldContext>& Contexts = GEngine->GetWorldContexts();
+                        for (const FWorldContext& Context : Contexts)
+                        {
+                                if (Context.World())
+                                {
+                                        return Context.World();
+                                }
+                        }
+                }
+
+                return nullptr;
+        }
 }

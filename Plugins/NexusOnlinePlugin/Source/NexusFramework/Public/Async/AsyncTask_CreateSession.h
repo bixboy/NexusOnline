@@ -25,12 +25,16 @@ public:
 	virtual void Activate() override;
 
 private:
-	void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
+        void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
 
-	UPROPERTY()
-	UObject* WorldContextObject;
+        UPROPERTY()
+        UObject* WorldContextObject;
 
-	FSessionSettingsData Data;
-	
-	FDelegateHandle CreateDelegateHandle;
+        UWorld* GetWorldSafe();
+
+        TWeakObjectPtr<UWorld> CachedWorld;
+
+        FSessionSettingsData Data;
+
+        FDelegateHandle CreateDelegateHandle;
 };

@@ -18,17 +18,15 @@ UAsyncTask_JoinSession* UAsyncTask_JoinSession::JoinSession(UObject* WorldContex
 
 void UAsyncTask_JoinSession::Activate()
 {
-	if (!WorldContextObject)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Invalid WorldContextObject in JoinSessions"));
-		
-		OnFailure.Broadcast();
-		return;
-	}
-	
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+    if (!WorldContextObject)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Null WorldContextObject in JoinSession, attempting fallback world."));
+    }
+
+    UWorld* World = NexusOnline::ResolveWorld(WorldContextObject);
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Unable to resolve world in JoinSession."));
         OnFailure.Broadcast();
         return;
     }
@@ -58,9 +56,10 @@ void UAsyncTask_JoinSession::Activate()
 
 void UAsyncTask_JoinSession::OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
 {
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+    UWorld* World = NexusOnline::ResolveWorld(WorldContextObject);
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] World invalid during OnJoinSessionComplete."));
         OnFailure.Broadcast();
         return;
     }

@@ -7,6 +7,7 @@
 #include "Interfaces/OnlinePresenceInterface.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSubsystemTypes.h"
+#include "Utils/NexusOnlineHelpers.h"
 
 // ────────────────────────────────────────────────
 // Log Helper
@@ -39,8 +40,18 @@ namespace
 // ────────────────────────────────────────────────
 IOnlineSubsystem* UNexusSteamUtils::GetOSS(UObject* WorldContextObject)
 {
-	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-	return Online::GetSubsystem(World);
+        if (!WorldContextObject)
+        {
+                LOG_STEAM(Warning, TEXT("Null WorldContextObject in GetOSS, attempting fallback world."));
+        }
+
+        if (UWorld* World = NexusOnline::ResolveWorld(WorldContextObject))
+        {
+                return Online::GetSubsystem(World);
+        }
+
+        LOG_STEAM(Error, TEXT("Unable to resolve world in GetOSS."));
+        return nullptr;
 }
 
 IOnlineIdentityPtr UNexusSteamUtils::GetIdentity(UObject* WorldContextObject)

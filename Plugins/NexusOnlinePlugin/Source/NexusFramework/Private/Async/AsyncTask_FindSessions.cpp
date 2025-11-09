@@ -22,17 +22,15 @@ UAsyncTask_FindSessions* UAsyncTask_FindSessions::FindSessions(UObject* WorldCon
 
 void UAsyncTask_FindSessions::Activate()
 {
-	if (!WorldContextObject)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Invalid WorldContextObject in FindSessions"));
-		
-        OnCompleted.Broadcast(false, {});
-		return;
-	}
-	
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+    if (!WorldContextObject)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Null WorldContextObject in FindSessions, attempting fallback world."));
+    }
+
+    UWorld* World = NexusOnline::ResolveWorld(WorldContextObject);
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Unable to resolve world in FindSessions."));
         OnCompleted.Broadcast(false, {});
         return;
     }
@@ -66,12 +64,18 @@ void UAsyncTask_FindSessions::OnFindSessionsComplete(bool bWasSuccessful)
 {
     TArray<FOnlineSessionSearchResultData> ResultsData;
 
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-	
-	if (!Session.IsValid())
-	{
-		OnCompleted.Broadcast(false, {});
+    UWorld* World = NexusOnline::ResolveWorld(WorldContextObject);
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NexusOnline] World invalid during OnFindSessionsComplete."));
+        OnCompleted.Broadcast(false, {});
+        return;
+    }
+    IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+
+    if (!Session.IsValid())
+    {
+        OnCompleted.Broadcast(false, {});
 		return;
 	}
 
