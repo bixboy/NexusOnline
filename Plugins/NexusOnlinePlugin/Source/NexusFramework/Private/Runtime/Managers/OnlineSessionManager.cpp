@@ -11,6 +11,36 @@
 #include "GameFramework/OnlineSessionNames.h"
 #include "Utils/NexusOnlineHelpers.h"
 
+namespace
+{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+template <typename SessionType>
+auto ClearParticipantsChangeDelegateImpl(SessionType& Session, const FDelegateHandle& Handle, int)
+    -> decltype(Session.ClearOnSessionParticipantsChangeDelegate_Handle(Handle), void())
+{
+    Session.ClearOnSessionParticipantsChangeDelegate_Handle(Handle);
+}
+
+template <typename SessionType>
+auto ClearParticipantsChangeDelegateImpl(SessionType& Session, const FDelegateHandle& Handle, long)
+    -> decltype(Session.UnregisterOnSessionParticipantsChangeDelegate(Handle), void())
+{
+    Session.UnregisterOnSessionParticipantsChangeDelegate(Handle);
+}
+
+template <typename SessionType>
+void ClearParticipantsChangeDelegateImpl(SessionType&, const FDelegateHandle&, ...)
+{
+}
+
+template <typename SessionType>
+void ClearParticipantsChangeDelegate(SessionType& Session, const FDelegateHandle& Handle)
+{
+    ClearParticipantsChangeDelegateImpl(Session, Handle, 0);
+}
+#endif // ENGINE VERSION GUARD
+}
+
 AOnlineSessionManager::AOnlineSessionManager()
 {
     bReplicates = true;
@@ -211,7 +241,7 @@ void AOnlineSessionManager::UnbindSessionDelegates()
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
             if (ParticipantsChangedDelegateHandle.IsValid())
             {
-                Session->ClearOnSessionParticipantsChangeDelegate_Handle(ParticipantsChangedDelegateHandle);
+                ClearParticipantsChangeDelegate(*Session, ParticipantsChangedDelegateHandle);
                 ParticipantsChangedDelegateHandle = FDelegateHandle();
             }
 #endif
