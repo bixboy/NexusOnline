@@ -84,6 +84,20 @@ namespace NexusOnline
         //───────────────────────────────────────────────
         static FORCEINLINE UWorld* ResolveWorld(UObject* WorldContextObject)
         {
+                auto IsPreferredWorldType = [](EWorldType::Type Type)
+                {
+                        switch (Type)
+                        {
+                        case EWorldType::Game:
+                        case EWorldType::PIE:
+                        case EWorldType::GamePreview:
+                        case EWorldType::GameRPC:
+                                return true;
+                        default:
+                                return false;
+                        }
+                };
+
                 if (GEngine)
                 {
                         if (WorldContextObject)
@@ -98,20 +112,43 @@ namespace NexusOnline
                         {
                                 if (UWorld* ViewportWorld = Viewport->GetWorld())
                                 {
-                                        return ViewportWorld;
+                                        if (IsPreferredWorldType(ViewportWorld->WorldType))
+                                        {
+                                                return ViewportWorld;
+                                        }
                                 }
                         }
+
+                        UWorld* FallbackWorld = nullptr;
 
                         const TIndirectArray<FWorldContext>& Contexts = GEngine->GetWorldContexts();
                         for (const FWorldContext& Context : Contexts)
                         {
-                                if (Context.World())
+                                if (UWorld* ContextWorld = Context.World())
                                 {
-                                        return Context.World();
+                                        if (IsPreferredWorldType(Context.WorldType))
+                                        {
+                                                return ContextWorld;
+                                        }
+
+                                        if (!FallbackWorld)
+                                        {
+                                                FallbackWorld = ContextWorld;
+                                        }
                                 }
+                        }
+
+                        if (FallbackWorld)
+                        {
+                                return FallbackWorld;
                         }
                 }
 
-                return nullptr;
+                if (GWorld && IsPreferredWorldType(GWorld->WorldType))
+                {
+                        return GWorld;
+                }
+
+                return GWorld;
         }
 }
