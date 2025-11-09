@@ -2,6 +2,7 @@
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "Utils/NexusOnlineHelpers.h"
 
@@ -33,12 +34,31 @@ bool UNexusOnlineBlueprintLibrary::GetSessionPlayerCounts(UObject* WorldContextO
         const FName SessionName = NexusOnline::SessionTypeToName(SessionType);
         if (FNamedOnlineSession* NamedSession = SessionInterface->GetNamedSession(SessionName))
         {
-                MaxPlayers = NamedSession->SessionSettings.NumPublicConnections;
+                const int32 ConnectionsMax = NamedSession->Session.SessionSettings.NumPublicConnections;
+                const int32 LegacyMax = NamedSession->SessionSettings.NumPublicConnections;
+                MaxPlayers = ConnectionsMax > 0 ? ConnectionsMax : LegacyMax;
 
-                const int32 OccupiedFromConnections = MaxPlayers - NamedSession->NumOpenPublicConnections;
+                const int32 OccupiedFromSessionConnections = ConnectionsMax > 0
+                        ? (ConnectionsMax - NamedSession->Session.NumOpenPublicConnections)
+                        : 0;
+                const int32 OccupiedFromLegacyConnections = LegacyMax > 0
+                        ? (LegacyMax - NamedSession->NumOpenPublicConnections)
+                        : 0;
                 const int32 OccupiedFromRegistrations = NamedSession->RegisteredPlayers.Num();
 
-                CurrentPlayers = FMath::Max(OccupiedFromConnections, OccupiedFromRegistrations);
+                int32 ObservedPlayers = FMath::Max(OccupiedFromSessionConnections, OccupiedFromLegacyConnections);
+                ObservedPlayers = FMath::Max(ObservedPlayers, OccupiedFromRegistrations);
+
+                if (AGameStateBase* GameState = World->GetGameState())
+                {
+                        ObservedPlayers = FMath::Max(ObservedPlayers, GameState->PlayerArray.Num());
+                        if (MaxPlayers <= 0 && GameState->PlayerArray.Num() > 0)
+                        {
+                                MaxPlayers = FMath::Max(MaxPlayers, ObservedPlayers);
+                        }
+                }
+
+                CurrentPlayers = ObservedPlayers;
                 CurrentPlayers = FMath::Clamp(CurrentPlayers, 0, MaxPlayers > 0 ? MaxPlayers : CurrentPlayers);
                 return true;
         }
