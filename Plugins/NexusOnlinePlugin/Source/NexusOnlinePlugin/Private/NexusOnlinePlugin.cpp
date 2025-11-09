@@ -1,15 +1,15 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "NexusOnlineFramwork.h"
+#include "NexusOnlinePlugin.h"
 
-#define LOCTEXT_NAMESPACE "FNexusOnlineFramworkModule"
+#define LOCTEXT_NAMESPACE "FNexusOnlinePluginModule"
 
-void FNexusOnlineFramworkModule::StartupModule()
+void FNexusOnlinePluginModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
 }
 
-void FNexusOnlineFramworkModule::ShutdownModule()
+void FNexusOnlinePluginModule::ShutdownModule()
 {
 	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
 	// we call this function before unloading the module.
@@ -17,4 +17,4 @@ void FNexusOnlineFramworkModule::ShutdownModule()
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FNexusOnlineFramworkModule, NexusOnlineFramwork)
+IMPLEMENT_MODULE(FNexusOnlinePluginModule, NexusOnlinePlugin)

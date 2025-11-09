@@ -4,7 +4,7 @@
 
 #include "Modules/ModuleManager.h"
 
-class FNexusOnlineFramworkModule : public IModuleInterface
+class FNexusOnlinePluginModule : public IModuleInterface
 {
 public:
 
