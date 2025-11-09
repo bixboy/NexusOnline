@@ -83,5 +83,5 @@ public:
 
 	//  UI helpers
 	UFUNCTION(BlueprintCallable, Category="Nexus|Online")
-	FText GetSessionInfoText() const;
+	FText GetSessionInfoText();
 };

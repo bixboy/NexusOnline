@@ -13,6 +13,7 @@ public class NexusFramework : ModuleRules
 		    "Engine",
 		    "OnlineSubsystem",
 		    "OnlineSubsystemUtils",
+		    "OnlineSubsystemSteam",
 		    "UMG",
 		    "Slate",
 		    "SlateCore"

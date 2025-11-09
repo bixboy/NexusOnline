@@ -1,52 +1,19 @@
-#include "Runtime/Managers/OnlineSessionManager.h"
-
-#include "Engine/Engine.h"
+#include "Managers/OnlineSessionManager.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "Net/UnrealNetwork.h"
-#include "OnlineSubsystem.h"
-#include "OnlineSubsystemTypes.h"
-#include "Runtime/Launch/Resources/Version.h"
-#include "GameFramework/OnlineSessionNames.h"
+#include "TimerManager.h"
 #include "Utils/NexusOnlineHelpers.h"
 
-namespace
-{
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
-template <typename SessionType>
-auto ClearParticipantsChangeDelegateImpl(SessionType& Session, const FDelegateHandle& Handle, int)
-    -> decltype(Session.ClearOnSessionParticipantsChangeDelegate_Handle(Handle), void())
-{
-    Session.ClearOnSessionParticipantsChangeDelegate_Handle(Handle);
-}
-
-template <typename SessionType>
-auto ClearParticipantsChangeDelegateImpl(SessionType& Session, const FDelegateHandle& Handle, long)
-    -> decltype(Session.UnregisterOnSessionParticipantsChangeDelegate(Handle), void())
-{
-    Session.UnregisterOnSessionParticipantsChangeDelegate(Handle);
-}
-
-template <typename SessionType>
-void ClearParticipantsChangeDelegateImpl(SessionType&, const FDelegateHandle&, ...)
-{
-}
-
-template <typename SessionType>
-void ClearParticipantsChangeDelegate(SessionType& Session, const FDelegateHandle& Handle)
-{
-    ClearParticipantsChangeDelegateImpl(Session, Handle, 0);
-}
-#endif // ENGINE VERSION GUARD
-}
 
 AOnlineSessionManager::AOnlineSessionManager()
 {
     bReplicates = true;
     bAlwaysRelevant = true;
-    SetReplicateMovement(false);
     PrimaryActorTick.bCanEverTick = false;
+
     PlayerCount = 0;
     LastNotifiedPlayerCount = INDEX_NONE;
     TrackedSessionName = NAME_None;
@@ -55,17 +22,23 @@ AOnlineSessionManager::AOnlineSessionManager()
 void AOnlineSessionManager::BeginPlay()
 {
     Super::BeginPlay();
-
+	
+	UE_LOG(LogTemp, Log, TEXT("[SessionManager] BeginPlay (Authority: %s)"), HasAuthority() ? TEXT("Server") : TEXT("Client"));
+	
     if (HasAuthority())
     {
         BindSessionDelegates();
         RefreshPlayerCount();
+
+        GetWorldTimerManager().SetTimer
+    	(
+            TimerHandle_Refresh, this, &AOnlineSessionManager::RefreshPlayerCount, 5.f, true
+        );
     }
     else
     {
         LastNotifiedPlayerCount = PlayerCount;
         OnRep_PlayerCount();
-        ForceUpdatePlayerCount();
     }
 }
 
@@ -74,6 +47,7 @@ void AOnlineSessionManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
     if (HasAuthority())
     {
         UnbindSessionDelegates();
+        GetWorldTimerManager().ClearTimer(TimerHandle_Refresh);
     }
 
     Super::EndPlay(EndPlayReason);
@@ -137,30 +111,17 @@ TArray<FString> AOnlineSessionManager::GetPlayerList() const
 AOnlineSessionManager* AOnlineSessionManager::Get(UObject* WorldContextObject)
 {
     if (!WorldContextObject)
-    {
         return nullptr;
-    }
 
     UWorld* World = WorldContextObject->GetWorld();
-    if (!World)
-    {
-        if (!GEngine)
-        {
-            return nullptr;
-        }
-
+    if (!World && GEngine)
         World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull);
-    }
 
     if (!World)
-    {
         return nullptr;
-    }
 
     for (TActorIterator<AOnlineSessionManager> It(World); It; ++It)
-    {
         return *It;
-    }
 
     return nullptr;
 }
@@ -168,9 +129,7 @@ AOnlineSessionManager* AOnlineSessionManager::Get(UObject* WorldContextObject)
 void AOnlineSessionManager::RefreshPlayerCount()
 {
     if (!HasAuthority())
-    {
         return;
-    }
 
     int32 NewCount = 0;
 
@@ -200,13 +159,10 @@ void AOnlineSessionManager::BroadcastPlayerCountChange(int32 PreviousCount, int3
     OnPlayerCountChanged.Broadcast(NewCount);
 
     if (!bAllowFallbackEvents)
-    {
         return;
-    }
 
     if (NewCount > PreviousCount)
     {
-        // Broadcast joined event without a specific id (fallback).
         OnPlayerJoined.Broadcast(TEXT(""));
     }
     else if (NewCount < PreviousCount)
@@ -221,13 +177,17 @@ void AOnlineSessionManager::BindSessionDelegates()
     {
         if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World))
         {
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
-            if (!ParticipantsChangedDelegateHandle.IsValid())
-            {
-                ParticipantsChangedDelegateHandle = Session->AddOnSessionParticipantsChangeDelegate_Handle(
-                    FOnSessionParticipantsChangeDelegate::CreateUObject(this, &AOnlineSessionManager::HandleParticipantsChanged));
-            }
-#endif
+            // Player join
+            RegisterPlayersHandle = Session->AddOnRegisterPlayersCompleteDelegate_Handle
+        	(
+                FOnRegisterPlayersCompleteDelegate::CreateUObject(this, &AOnlineSessionManager::OnPlayersRegistered)
+            );
+
+            // Player leave
+            UnregisterPlayersHandle = Session->AddOnUnregisterPlayersCompleteDelegate_Handle
+        	(
+                FOnUnregisterPlayersCompleteDelegate::CreateUObject(this, &AOnlineSessionManager::OnPlayersUnregistered)
+            );
         }
     }
 }
@@ -238,40 +198,39 @@ void AOnlineSessionManager::UnbindSessionDelegates()
     {
         if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World))
         {
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
-            if (ParticipantsChangedDelegateHandle.IsValid())
+            if (RegisterPlayersHandle.IsValid())
             {
-                ClearParticipantsChangeDelegate(*Session, ParticipantsChangedDelegateHandle);
-                ParticipantsChangedDelegateHandle = FDelegateHandle();
+                Session->ClearOnRegisterPlayersCompleteDelegate_Handle(RegisterPlayersHandle);
+                RegisterPlayersHandle.Reset();
             }
-#endif
+
+            if (UnregisterPlayersHandle.IsValid())
+            {
+                Session->ClearOnUnregisterPlayersCompleteDelegate_Handle(UnregisterPlayersHandle);
+                UnregisterPlayersHandle.Reset();
+            }
         }
     }
 }
 
-void AOnlineSessionManager::HandleParticipantsChanged(FName SessionName, const FUniqueNetId& PlayerId, bool bJoined)
+void AOnlineSessionManager::OnPlayersRegistered(FName SessionName, const TArray<FUniqueNetIdRef>& Players, bool bWasSuccessful)
 {
     if (!HasAuthority())
-    {
         return;
-    }
-
-    const FName EffectiveSessionName = TrackedSessionName.IsNone() ? NAME_GameSession : TrackedSessionName;
-    if (!EffectiveSessionName.IsNone() && SessionName != EffectiveSessionName)
-    {
-        return;
-    }
-
-    const FString PlayerIdString = PlayerId.ToString();
 
     RefreshPlayerCount();
 
-    if (bJoined)
-    {
-        OnPlayerJoined.Broadcast(PlayerIdString);
-    }
-    else
-    {
-        OnPlayerLeft.Broadcast(PlayerIdString);
-    }
+    for (const FUniqueNetIdRef& Id : Players)
+        OnPlayerJoined.Broadcast(Id->ToString());
+}
+
+void AOnlineSessionManager::OnPlayersUnregistered(FName SessionName, const TArray<FUniqueNetIdRef>& Players, bool bWasSuccessful)
+{
+    if (!HasAuthority())
+        return;
+
+    RefreshPlayerCount();
+
+    for (const FUniqueNetIdRef& Id : Players)
+        OnPlayerLeft.Broadcast(Id->ToString());
 }

@@ -21,6 +21,10 @@
 		{
 			"Name": "LevelSelection",
 			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemSteam",
+			"Enabled": true
 		}
 	]
 }
