@@ -2,6 +2,9 @@
 #include "OnlineSubsystem.h"
 #include "OnlineSessionSettings.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "Interfaces/OnlineIdentityInterface.h"
+#include "OnlineSubsystemTypes.h"
+#include "OnlineSubsystemUtils.h"
 #include "Utils/NexusOnlineHelpers.h"
 
 
@@ -89,11 +92,24 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
 		if (Session.IsValid() && Identity.IsValid())
 		{
 			TSharedPtr<const FUniqueNetId> LocalUserId = Identity->GetUniquePlayerId(0);
-			if (LocalUserId.IsValid())
-			{
-				Session->RegisterLocalPlayer(*LocalUserId, SessionName, FOnRegisterLocalPlayerCompleteDelegate());
-				UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Local player registered to session."));
-			}
+                        if (LocalUserId.IsValid())
+                        {
+                                Session->RegisterLocalPlayer(*LocalUserId, SessionName, FOnRegisterLocalPlayerCompleteDelegate());
+                                const bool bRegisterResult = Session->RegisterPlayer(SessionName, *LocalUserId, /*bWasInvited*/ false);
+
+                                if (!bRegisterResult)
+                                {
+                                        if (FNamedOnlineSession* LocalSession = Session->GetNamedSession(SessionName))
+                                        {
+                                                const FUniqueNetIdRepl NetIdRepl(LocalUserId);
+                                                LocalSession->RegisteredPlayers.AddUnique(NetIdRepl);
+                                                UE_LOG(LogTemp, Verbose, TEXT("[NexusOnline] RegisterPlayer failed during creation, manually appended local user."));
+                                        }
+                                }
+
+                                UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Local player registered to session. RegisterPlayer result: %s"),
+                                       bRegisterResult ? TEXT("Success") : TEXT("Failure"));
+                        }
 		}
 
 		OnSuccess.Broadcast();

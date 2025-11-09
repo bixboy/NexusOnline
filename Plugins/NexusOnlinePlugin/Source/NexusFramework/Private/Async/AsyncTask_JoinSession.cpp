@@ -1,8 +1,10 @@
 ﻿#include "Async/AsyncTask_JoinSession.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
+#include "Interfaces/OnlineIdentityInterface.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "GameFramework/PlayerController.h"
+#include "OnlineSubsystemTypes.h"
 #include "Utils/NexusOnlineHelpers.h"
 
 
@@ -87,6 +89,37 @@ void UAsyncTask_JoinSession::OnJoinSessionComplete(FName SessionName, EOnJoinSes
         UE_LOG(LogTemp, Error, TEXT("[NexusOnline] Failed to resolve connection string"));
         OnFailure.Broadcast();
         return;
+    }
+
+    if (IOnlineIdentityPtr Identity = Online::GetIdentityInterface(World))
+    {
+        TSharedPtr<const FUniqueNetId> LocalUserId = Identity->GetUniquePlayerId(0);
+        if (LocalUserId.IsValid())
+        {
+            Session->RegisterLocalPlayer(*LocalUserId, SessionName, FOnRegisterLocalPlayerCompleteDelegate());
+            const bool bRegisterResult = Session->RegisterPlayer(SessionName, *LocalUserId, /*bWasInvited*/ false);
+
+            if (!bRegisterResult)
+            {
+                if (FNamedOnlineSession* LocalSession = Session->GetNamedSession(SessionName))
+                {
+                    const FUniqueNetIdRepl NetIdRepl(LocalUserId);
+                    LocalSession->RegisteredPlayers.AddUnique(NetIdRepl);
+                    UE_LOG(LogTemp, Verbose, TEXT("[NexusOnline] RegisterPlayer failed, manually appended local user to RegisteredPlayers."));
+                }
+            }
+
+            UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Local player registered to session '%s'. RegisterPlayer result: %s"),
+                   *SessionName.ToString(), bRegisterResult ? TEXT("Success") : TEXT("Failure"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Unable to register local player: invalid user id."));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Unable to register local player: identity interface unavailable."));
     }
 
     UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Connecting to: %s"), *ConnectString);

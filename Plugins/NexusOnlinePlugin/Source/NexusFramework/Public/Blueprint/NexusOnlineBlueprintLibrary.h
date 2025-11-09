@@ -11,9 +11,15 @@
 UCLASS()
 class NEXUSFRAMEWORK_API UNexusOnlineBlueprintLibrary : public UBlueprintFunctionLibrary
 {
-	GENERATED_BODY()
-	
+        GENERATED_BODY()
+
 public:
-	
+
+        /**
+         * Récupère dynamiquement le nombre de joueurs inscrits dans une session donnée.
+         * @return true si la session est trouvée et les informations renseignées.
+         */
+        UFUNCTION(BlueprintCallable, Category="Nexus|Online|Session", meta=(WorldContext="WorldContextObject"))
+        static bool GetSessionPlayerCounts(UObject* WorldContextObject, ENexusSessionType SessionType, int32& CurrentPlayers, int32& MaxPlayers);
 };
 

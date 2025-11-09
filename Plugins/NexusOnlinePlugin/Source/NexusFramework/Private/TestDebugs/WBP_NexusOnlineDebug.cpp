@@ -5,6 +5,7 @@
 #include "Async/AsyncTask_JoinSession.h"
 #include "Kismet/GameplayStatics.h"
 #include "Utils/NexusOnlineHelpers.h"
+#include "Blueprint/NexusOnlineBlueprintLibrary.h"
 
 void UWBP_NexusOnlineDebug::NativeConstruct()
 {
@@ -126,23 +127,34 @@ void UWBP_NexusOnlineDebug::OnLeaveFailure()
 #pragma region 🧠 SESSION INFO
 void UWBP_NexusOnlineDebug::UpdateSessionInfo()
 {
-	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld());
-	if (Session.IsValid())
-	{
-		if (FNamedOnlineSession* Active = Session->GetNamedSession(NAME_GameSession))
-		{
-			CurrentSessionName = Active->SessionName.ToString();
-			
-			int32 PublicCount = Active->SessionSettings.NumPublicConnections;
-			int32 OpenCount = Active->NumOpenPublicConnections;
+        IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld());
+        if (Session.IsValid())
+        {
+                const FName TargetSessionName = NexusOnline::SessionTypeToName(ENexusSessionType::GameSession);
+                if (FNamedOnlineSession* Active = Session->GetNamedSession(TargetSessionName))
+                {
+                        CurrentSessionName = Active->SessionName.ToString();
 
-			CurrentPlayers = PublicCount - OpenCount;
-			MaxPlayers = PublicCount;
-
-			UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Session: %s (%d/%d players registered, %d open slots)"), *CurrentSessionName, CurrentPlayers, MaxPlayers, OpenCount);
-			return;
-		}
-	}
+                        int32 RetrievedCurrentPlayers = 0;
+                        int32 RetrievedMaxPlayers = 0;
+                        if (UNexusOnlineBlueprintLibrary::GetSessionPlayerCounts(this, ENexusSessionType::GameSession, RetrievedCurrentPlayers, RetrievedMaxPlayers))
+                        {
+                                CurrentPlayers = RetrievedCurrentPlayers;
+                                MaxPlayers = RetrievedMaxPlayers;
+                                const int32 OpenCount = FMath::Max(0, MaxPlayers - CurrentPlayers);
+                                UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Session: %s (%d/%d players registered, %d open slots)"), *CurrentSessionName, CurrentPlayers, MaxPlayers, OpenCount);
+                        }
+                        else
+                        {
+                                CurrentPlayers = Active->RegisteredPlayers.Num();
+                                MaxPlayers = Active->SessionSettings.NumPublicConnections;
+                                const int32 OpenCount = FMath::Max(0, MaxPlayers - CurrentPlayers);
+                                UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] Fallback session info used for %s."), *CurrentSessionName);
+                                UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Session: %s (%d/%d players registered, %d open slots)"), *CurrentSessionName, CurrentPlayers, MaxPlayers, OpenCount);
+                        }
+                        return;
+                }
+        }
 
 	CurrentSessionName = TEXT("No session active");
 	CurrentPlayers = 0;
