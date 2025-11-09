@@ -38,15 +38,7 @@ bool UNexusOnlineBlueprintLibrary::GetSessionPlayerCounts(UObject* WorldContextO
                 const int32 OccupiedFromConnections = MaxPlayers - NamedSession->NumOpenPublicConnections;
                 const int32 OccupiedFromRegistrations = NamedSession->RegisteredPlayers.Num();
 
-                if (OccupiedFromRegistrations > 0)
-                {
-                        CurrentPlayers = OccupiedFromRegistrations;
-                }
-                else
-                {
-                        CurrentPlayers = OccupiedFromConnections;
-                }
-
+                CurrentPlayers = FMath::Max(OccupiedFromConnections, OccupiedFromRegistrations);
                 CurrentPlayers = FMath::Clamp(CurrentPlayers, 0, MaxPlayers > 0 ? MaxPlayers : CurrentPlayers);
                 return true;
         }
