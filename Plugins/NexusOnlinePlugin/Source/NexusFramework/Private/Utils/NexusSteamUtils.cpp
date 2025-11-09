@@ -90,20 +90,48 @@ TSharedPtr<const FUniqueNetId> UNexusSteamUtils::GetLocalUserId(UObject* WorldCo
 // ────────────────────────────────────────────────
 void UNexusSteamUtils::BuildFriendInfo(const TSharedRef<FOnlineFriend>& InFriend, FSteamFriendInfo& OutInfo)
 {
-	OutInfo.DisplayName = InFriend->GetDisplayName();
-	OutInfo.RealName    = InFriend->GetRealName();
+	// ✅ Strings sécurisées — GetDisplayName() et GetRealName() peuvent être vides
+	const FString SafeDisplay = InFriend->GetDisplayName().IsEmpty()
+		? TEXT("[Unknown Name]")
+		: InFriend->GetDisplayName();
+
+	const FString SafeReal = InFriend->GetRealName().IsEmpty()
+		? TEXT("[Unknown RealName]")
+		: InFriend->GetRealName();
+
+	OutInfo.DisplayName = SafeDisplay;
+	OutInfo.RealName    = SafeReal;
 	OutInfo.UniqueId    = InFriend->GetUserId();
 
-	const FOnlineUserPresence& P = InFriend->GetPresence();
+	// ✅ Sécurise aussi la présence
+	const FOnlineUserPresence& Presence = InFriend->GetPresence();
+
 #if (ENGINE_MAJOR_VERSION >= 5)
-	OutInfo.PresenceStatus = P.Status.StatusStr;
+	OutInfo.PresenceStatus = Presence.Status.StatusStr.IsEmpty()
+		? TEXT("[No Status]")
+		: Presence.Status.StatusStr;
 #else
-	OutInfo.PresenceStatus = P.StatusStr;
+	OutInfo.PresenceStatus = Presence.StatusStr.IsEmpty()
+		? TEXT("[No Status]")
+		: Presence.StatusStr;
 #endif
-	OutInfo.bIsOnline   = P.bIsOnline;
-	OutInfo.bIsPlaying  = P.bIsPlaying || P.bIsPlayingThisGame;
-	OutInfo.bIsJoinable = P.bIsJoinable;
+
+	OutInfo.bIsOnline   = Presence.bIsOnline;
+	OutInfo.bIsPlaying  = Presence.bIsPlaying || Presence.bIsPlayingThisGame;
+	OutInfo.bIsJoinable = Presence.bIsJoinable;
+
+#if !(UE_BUILD_SHIPPING)
+	FString DebugMsg = FString::Printf(
+		TEXT("Friend: %s | Online:%d | Playing:%d | Joinable:%d"),
+		*OutInfo.DisplayName,
+		OutInfo.bIsOnline,
+		OutInfo.bIsPlaying,
+		OutInfo.bIsJoinable
+	);
+	GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, DebugMsg);
+#endif
 }
+
 
 // ────────────────────────────────────────────────
 // Public API
