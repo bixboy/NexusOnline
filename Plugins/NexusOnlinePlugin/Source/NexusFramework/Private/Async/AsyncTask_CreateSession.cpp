@@ -2,7 +2,10 @@
 #include "OnlineSubsystem.h"
 #include "OnlineSessionSettings.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "Runtime/Managers/OnlineSessionManager.h"
 #include "Utils/NexusOnlineHelpers.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 
 
 UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(UObject* WorldContextObject, const FSessionSettingsData& SettingsData)
@@ -81,23 +84,44 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
 	UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Session '%s' creation result: %s"), *SessionName.ToString(), 
 		bWasSuccessful ? TEXT("SUCCESS") : TEXT("FAILURE"));
 
-	if (bWasSuccessful)
-	{
-		IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-		IOnlineIdentityPtr Identity = Online::GetIdentityInterface(World);
+        if (bWasSuccessful)
+        {
+                IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+                IOnlineIdentityPtr Identity = Online::GetIdentityInterface(World);
 
-		if (Session.IsValid() && Identity.IsValid())
-		{
-			TSharedPtr<const FUniqueNetId> LocalUserId = Identity->GetUniquePlayerId(0);
-			if (LocalUserId.IsValid())
-			{
-				Session->RegisterLocalPlayer(*LocalUserId, SessionName, FOnRegisterLocalPlayerCompleteDelegate());
-				UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Local player registered to session."));
-			}
-		}
+                if (Session.IsValid() && Identity.IsValid())
+                {
+                        TSharedPtr<const FUniqueNetId> LocalUserId = Identity->GetUniquePlayerId(0);
+                        if (LocalUserId.IsValid())
+                        {
+                                Session->RegisterLocalPlayer(*LocalUserId, SessionName, FOnRegisterLocalPlayerCompleteDelegate());
+                                UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Local player registered to session."));
+                        }
+                }
 
-		OnSuccess.Broadcast();
-	}
+                if (World && World->GetNetMode() != NM_Client)
+                {
+                        AOnlineSessionManager* ExistingManager = AOnlineSessionManager::Get(World);
+                        if (!ExistingManager)
+                        {
+                                FActorSpawnParameters SpawnParams;
+                                SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+                                ExistingManager = World->SpawnActor<AOnlineSessionManager>(AOnlineSessionManager::StaticClass(), FTransform::Identity, SpawnParams);
+                                if (ExistingManager)
+                                {
+                                        UE_LOG(LogTemp, Log, TEXT("[NexusOnline] OnlineSessionManager spawned for '%s'."), *SessionName.ToString());
+                                }
+                        }
+
+                        if (ExistingManager)
+                        {
+                                ExistingManager->TrackedSessionName = SessionName;
+                                ExistingManager->ForceUpdatePlayerCount();
+                        }
+                }
+
+                OnSuccess.Broadcast();
+        }
 	else
 	{
 		OnFailure.Broadcast();
