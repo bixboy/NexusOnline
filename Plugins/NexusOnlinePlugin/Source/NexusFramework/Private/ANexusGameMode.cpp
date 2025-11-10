@@ -65,6 +65,45 @@ void AANexusGameMode::BeginPlay()
 }
 
 
+void AANexusGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+
+	if (!ErrorMessage.IsEmpty())
+		return;
+
+	if (!HasAuthority())
+		return;
+
+	UWorld* World = GetWorld();
+	if (!World)
+		return;
+
+	IOnlineSessionPtr Session = Online::GetSessionInterface(World);
+	if (!Session.IsValid())
+		return;
+
+	const FName SessionName = NAME_GameSession;
+	FNamedOnlineSession* NamedSession = Session->GetNamedSession(SessionName);
+	if (!NamedSession)
+		return;
+
+	const bool bHasOpenPublicConnections = NamedSession->NumOpenPublicConnections > 0;
+	const bool bHasOpenPrivateConnections = NamedSession->NumOpenPrivateConnections > 0;
+	if (bHasOpenPublicConnections || bHasOpenPrivateConnections)
+		return;
+
+	const int32 MaxPublic = NamedSession->SessionSettings.NumPublicConnections;
+	const int32 MaxPrivate = NamedSession->SessionSettings.NumPrivateConnections;
+	const int32 TotalMax = MaxPublic + MaxPrivate;
+
+	UE_LOG(LogTemp, Warning, TEXT("[NexusOnline] Rejecting login for '%s': session '%s' is full (Max=%d)."),
+			UniqueId.IsValid() ? *UniqueId->ToString() : TEXT("Unknown"),
+			*SessionName.ToString(),
+			TotalMax);
+
+	ErrorMessage = TEXT("SessionFull");
+}
 
 
 void AANexusGameMode::PostLogin(APlayerController* NewPlayer)
