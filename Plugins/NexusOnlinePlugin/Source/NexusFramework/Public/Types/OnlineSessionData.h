@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "CoreMinimal.h"
 #include "OnlineSessionSettings.h"
+#include "Data/SessionSearchFilter.h"
 #include "OnlineSessionData.generated.h"
 
 /** 
@@ -51,9 +52,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
 	bool bIsPrivate = false;
 
-	/** Type de session (Game, Party, etc.) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
-	ENexusSessionType SessionType = ENexusSessionType::GameSession;
+        /** Type de session (Game, Party, etc.) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
+        ENexusSessionType SessionType = ENexusSessionType::GameSession;
+
+        /** Paramètres supplémentaires exposés et publiés dans les settings de session. */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session", meta=(TitleProperty="Key"))
+        TArray<FSessionSearchFilter> AdditionalSettings;
 };
 
 
