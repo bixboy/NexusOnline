@@ -35,7 +35,7 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 	Settings.SessionType = ENexusSessionType::GameSession;
 	Settings.MaxPlayers = 4;
 	Settings.bIsPrivate = false;
-	Settings.bIsLAN = true;
+	Settings.bIsLAN = false;
 	Settings.MapName = TEXT("TestMap");
 	Settings.GameMode = TEXT("Default");
 

@@ -1,23 +1,12 @@
 ﻿#include "Utils/NexusSteamUtils.h"
-#include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
-#include "Interfaces/OnlineIdentityInterface.h"
-#include "Interfaces/OnlineFriendsInterface.h"
-#include "Interfaces/OnlineExternalUIInterface.h"
-#include "Interfaces/OnlinePresenceInterface.h"
-#include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSubsystemTypes.h"
+#include "Engine/Engine.h"
 
-// ────────────────────────────────────────────────
-// Log Helper
-// ────────────────────────────────────────────────
 #ifndef LOG_STEAM
 #define LOG_STEAM(Verbosity, Format, ...) UE_LOG(LogTemp, Verbosity, TEXT("[♟ NexusSteam] ") Format, ##__VA_ARGS__)
 #endif
 
-// ────────────────────────────────────────────────
-// Cache FriendList
-// ────────────────────────────────────────────────
 namespace
 {
 	struct FFriendsCacheEntry
@@ -26,55 +15,67 @@ namespace
 		FDateTime LastUpdateUtc = FDateTime::MinValue();
 	};
 
-	static TMap<FString, FFriendsCacheEntry> GFriendsCache;
+	TMap<FString, FFriendsCacheEntry> GFriendsCache;
 
-	static FString MakeFriendsCacheKey(FName ListName, int32 UserIndex)
+	FString MakeFriendsCacheKey(FName ListName, int32 UserIndex)
 	{
 		return FString::Printf(TEXT("%s:%d"), *ListName.ToString(), UserIndex);
 	}
+
+	template<typename T>
+	FORCEINLINE bool IsPtrValid(const T& Ptr) { return Ptr.IsValid(); }
 }
 
 // ────────────────────────────────────────────────
-// Helpers
+// Safe Getters
 // ────────────────────────────────────────────────
+
 IOnlineSubsystem* UNexusSteamUtils::GetOSS(UObject* WorldContextObject)
 {
-	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-	return Online::GetSubsystem(World);
+	if (!IsValid(WorldContextObject))
+		return nullptr;
+
+	UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull) : nullptr;
+	return World ? Online::GetSubsystem(World) : nullptr;
 }
 
 IOnlineIdentityPtr UNexusSteamUtils::GetIdentity(UObject* WorldContextObject)
 {
-	if (auto* OSS = GetOSS(WorldContextObject))
+	if (IOnlineSubsystem* OSS = GetOSS(WorldContextObject))
 		return OSS->GetIdentityInterface();
+	
 	return nullptr;
 }
 
 IOnlineFriendsPtr UNexusSteamUtils::GetFriends(UObject* WorldContextObject)
 {
-	if (auto* OSS = GetOSS(WorldContextObject))
+	if (IOnlineSubsystem* OSS = GetOSS(WorldContextObject))
 		return OSS->GetFriendsInterface();
+	
 	return nullptr;
 }
 
 IOnlineExternalUIPtr UNexusSteamUtils::GetExternalUI(UObject* WorldContextObject)
 {
-	if (auto* OSS = GetOSS(WorldContextObject))
+	if (IOnlineSubsystem* OSS = GetOSS(WorldContextObject))
 		return OSS->GetExternalUIInterface();
+	
 	return nullptr;
 }
 
 IOnlinePresencePtr UNexusSteamUtils::GetPresence(UObject* WorldContextObject)
 {
-	if (auto* OSS = GetOSS(WorldContextObject))
+	if (IOnlineSubsystem* OSS = GetOSS(WorldContextObject))
 		return OSS->GetPresenceInterface();
+	
 	return nullptr;
 }
 
 IOnlineSessionPtr UNexusSteamUtils::GetSession(UObject* WorldContextObject)
 {
-	if (auto* OSS = GetOSS(WorldContextObject))
+	if (IOnlineSubsystem* OSS = GetOSS(WorldContextObject))
 		return OSS->GetSessionInterface();
+	
 	return nullptr;
 }
 
@@ -82,195 +83,148 @@ TSharedPtr<const FUniqueNetId> UNexusSteamUtils::GetLocalUserId(UObject* WorldCo
 {
 	if (IOnlineIdentityPtr Identity = GetIdentity(WorldContextObject))
 		return Identity->GetUniquePlayerId(UserIndex);
+	
 	return nullptr;
 }
 
 // ────────────────────────────────────────────────
-// Friend Info Build
+// Core
 // ────────────────────────────────────────────────
+
 void UNexusSteamUtils::BuildFriendInfo(const TSharedRef<FOnlineFriend>& InFriend, FSteamFriendInfo& OutInfo)
 {
-	// ✅ Strings sécurisées — GetDisplayName() et GetRealName() peuvent être vides
-	const FString SafeDisplay = InFriend->GetDisplayName().IsEmpty()
-		? TEXT("[Unknown Name]")
-		: InFriend->GetDisplayName();
-
-	const FString SafeReal = InFriend->GetRealName().IsEmpty()
-		? TEXT("[Unknown RealName]")
-		: InFriend->GetRealName();
-
-	OutInfo.DisplayName = SafeDisplay;
-	OutInfo.RealName    = SafeReal;
+	OutInfo.DisplayName = InFriend->GetDisplayName().IsEmpty() ? TEXT("[Unknown Name]") : InFriend->GetDisplayName();
+	OutInfo.RealName    = InFriend->GetRealName().IsEmpty()    ? TEXT("[Unknown RealName]") : InFriend->GetRealName();
 	OutInfo.UniqueId    = InFriend->GetUserId();
 
-	// ✅ Sécurise aussi la présence
 	const FOnlineUserPresence& Presence = InFriend->GetPresence();
-
-#if (ENGINE_MAJOR_VERSION >= 5)
-	OutInfo.PresenceStatus = Presence.Status.StatusStr.IsEmpty()
-		? TEXT("[No Status]")
-		: Presence.Status.StatusStr;
-#else
-	OutInfo.PresenceStatus = Presence.StatusStr.IsEmpty()
-		? TEXT("[No Status]")
-		: Presence.StatusStr;
-#endif
-
+	OutInfo.PresenceStatus = Presence.Status.StatusStr.IsEmpty() ? TEXT("[No Status]") : Presence.Status.StatusStr;
 	OutInfo.bIsOnline   = Presence.bIsOnline;
 	OutInfo.bIsPlaying  = Presence.bIsPlaying || Presence.bIsPlayingThisGame;
 	OutInfo.bIsJoinable = Presence.bIsJoinable;
-
-#if !(UE_BUILD_SHIPPING)
-	FString DebugMsg = FString::Printf(
-		TEXT("Friend: %s | Online:%d | Playing:%d | Joinable:%d"),
-		*OutInfo.DisplayName,
-		OutInfo.bIsOnline,
-		OutInfo.bIsPlaying,
-		OutInfo.bIsJoinable
-	);
-	GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, DebugMsg);
-#endif
 }
 
-
-// ────────────────────────────────────────────────
-// Public API
-// ────────────────────────────────────────────────
-bool UNexusSteamUtils::IsSteamActive(UObject* WorldContextObject)
-{
-	if (auto* OSS = GetOSS(WorldContextObject))
-	{
-		const FName Name = OSS->GetSubsystemName();
-		if (Name.ToString().Equals(TEXT("STEAM"), ESearchCase::IgnoreCase))
-			return true;
-		LOG_STEAM(Warning, TEXT("Active subsystem is not Steam (%s)."), *Name.ToString());
-	}
-	else
-	{
-		LOG_STEAM(Warning, TEXT("No OnlineSubsystem active."));
-	}
-	return false;
-}
-
-bool UNexusSteamUtils::GetLocalPresence(UObject* WorldContextObject, FSteamPresence& OutPresence, int32 UserIndex)
-{
-	OutPresence = FSteamPresence{};
-	IOnlinePresencePtr Presence = GetPresence(WorldContextObject);
-	if (!Presence.IsValid())
-		return false;
-
-	if (TSharedPtr<const FUniqueNetId> LocalId = GetLocalUserId(WorldContextObject, UserIndex))
-	{
-		TSharedPtr<FOnlineUserPresence> RawPresence;
-		if (Presence->GetCachedPresence(*LocalId, RawPresence) && RawPresence.IsValid())
-		{
-#if (ENGINE_MAJOR_VERSION >= 5)
-			OutPresence.StatusText = RawPresence->Status.StatusStr;
-#else
-			OutPresence.StatusText = RawPresence->StatusStr;
-#endif
-			OutPresence.bIsOnline   = RawPresence->bIsOnline;
-			OutPresence.bIsPlaying  = RawPresence->bIsPlaying || RawPresence->bIsPlayingThisGame;
-			OutPresence.bIsJoinable = RawPresence->bIsJoinable;
-			return true;
-		}
-	}
-	return false;
-}
-
-FString UNexusSteamUtils::GetLocalSteamName(UObject* WorldContextObject, int32 UserIndex)
-{
-	if (IOnlineIdentityPtr Identity = GetIdentity(WorldContextObject))
-	{
-		if (TSharedPtr<const FUniqueNetId> LocalId = Identity->GetUniquePlayerId(UserIndex))
-		{
-			FSteamPresence Dummy;
-			GetLocalPresence(WorldContextObject, Dummy, UserIndex);
-
-			const FString Nick = Identity->GetPlayerNickname(*LocalId);
-			if (!Nick.IsEmpty())
-				return Nick;
-		}
-	}
-	return TEXT("Unknown");
-}
-
-FString UNexusSteamUtils::GetLocalSteamID(UObject* WorldContextObject, int32 UserIndex)
-{
-	if (TSharedPtr<const FUniqueNetId> Id = GetLocalUserId(WorldContextObject, UserIndex))
-		return Id->ToString();
-	return TEXT("0");
-}
-
-void UNexusSteamUtils::FillFriendsFromCacheOrOSS(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, int32 UserIndex, FName ListName)
+void UNexusSteamUtils::FillFriendsFromOSS(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, int32 UserIndex, FName ListName)
 {
 	OutFriends.Reset();
+
 	IOnlineFriendsPtr Friends = GetFriends(WorldContextObject);
-	if (!Friends.IsValid())
+	if (!IsPtrValid(Friends))
+	{
+		LOG_STEAM(Warning, TEXT("Friends interface not available."));
 		return;
+	}
 
 	TArray<TSharedRef<FOnlineFriend>> FriendList;
 	if (!Friends->GetFriendsList(UserIndex, ListName.ToString(), FriendList))
+	{
+		LOG_STEAM(Verbose, TEXT("Friends list not cached yet for list '%s' (UserIndex=%d)."), *ListName.ToString(), UserIndex);
 		return;
+	}
 
 	OutFriends.Reserve(FriendList.Num());
 	for (const TSharedRef<FOnlineFriend>& F : FriendList)
 	{
+		if (!F->GetUserId().ToSharedPtr())
+		{
+			LOG_STEAM(Warning, TEXT("Friend entry has invalid UserId. Skipping."));
+			continue;
+		}
+
 		FSteamFriendInfo Info;
 		BuildFriendInfo(F, Info);
 		OutFriends.Add(MoveTemp(Info));
 	}
 }
 
+// ────────────────────────────────────────────────
+// Public API
+// ────────────────────────────────────────────────
+
+FString UNexusSteamUtils::GetLocalSteamName(UObject* WorldContextObject, int32 UserIndex)
+{
+	IOnlineIdentityPtr Identity = GetIdentity(WorldContextObject);
+	if (!IsPtrValid(Identity))
+		return FString();
+
+	FString Nick = Identity->GetPlayerNickname(UserIndex);
+	if (!Nick.IsEmpty())
+		return Nick;
+
+	if (TSharedPtr<const FUniqueNetId> UserId = Identity->GetUniquePlayerId(UserIndex))
+	{
+		Nick = Identity->GetPlayerNickname(*UserId);
+	}
+	
+	return Nick;
+}
+
+FString UNexusSteamUtils::GetLocalSteamID(UObject* WorldContextObject, int32 UserIndex)
+{
+	if (TSharedPtr<const FUniqueNetId> Id = GetLocalUserId(WorldContextObject, UserIndex))
+		return Id->ToString();
+	return FString();
+}
+
 void UNexusSteamUtils::GetSteamFriends(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, int32 UserIndex)
 {
-	FillFriendsFromCacheOrOSS(WorldContextObject, OutFriends, UserIndex, TEXT("default"));
+	FillFriendsFromOSS(WorldContextObject, OutFriends, UserIndex, TEXT("default"));
 }
 
 void UNexusSteamUtils::ReadSteamFriends(UObject* WorldContextObject, const FOnSteamFriendsLoaded& OnCompleted, int32 UserIndex, FName ListName)
 {
 	IOnlineFriendsPtr Friends = GetFriends(WorldContextObject);
-	if (!Friends.IsValid())
+	if (!IsPtrValid(Friends))
 	{
+		LOG_STEAM(Warning, TEXT("ReadSteamFriends: Friends interface not available."));
 		OnCompleted.ExecuteIfBound(false);
 		return;
 	}
 
-	Friends->ReadFriendsList(UserIndex, ListName.ToString(),
-		FOnReadFriendsListComplete::CreateLambda([WorldContextObject, OnCompleted, UserIndex, ListName](int32, bool bSuccess, const FString&, const FString&)
-		{
-			if (!bSuccess)
+	TWeakObjectPtr WeakContext(WorldContextObject);
+
+	Friends->ReadFriendsList( UserIndex, ListName.ToString(), FOnReadFriendsListComplete::CreateLambda
+		([WeakContext, OnCompleted, UserIndex, ListName](int32 InLocalUserNum, bool bWasSuccessful, const FString& ListStr, const FString& ErrorStr)
 			{
-				OnCompleted.ExecuteIfBound(false);
-				return;
+				if (!WeakContext.IsValid() || !bWasSuccessful)
+				{
+					if (!ErrorStr.IsEmpty())
+					{
+						LOG_STEAM(Warning, TEXT("ReadFriendsList failed: %s"), *ErrorStr);
+					}
+					OnCompleted.ExecuteIfBound(false);
+					return;
+				}
+
+				TArray<FSteamFriendInfo> Fresh;
+				FillFriendsFromOSS(WeakContext.Get(), Fresh, UserIndex, ListName);
+
+				const FString Key = MakeFriendsCacheKey(ListName, UserIndex);
+				FFriendsCacheEntry& Entry = GFriendsCache.FindOrAdd(Key);
+				Entry.Friends = MoveTemp(Fresh);
+				Entry.LastUpdateUtc = FDateTime::UtcNow();
+
+				OnCompleted.ExecuteIfBound(true);
 			}
-
-			TArray<FSteamFriendInfo> Fresh;
-			UNexusSteamUtils::FillFriendsFromCacheOrOSS(WorldContextObject, Fresh, UserIndex, ListName);
-
-			const FString Key = MakeFriendsCacheKey(ListName, UserIndex);
-			FFriendsCacheEntry& Entry = GFriendsCache.FindOrAdd(Key);
-			Entry.Friends = MoveTemp(Fresh);
-			Entry.LastUpdateUtc = FDateTime::UtcNow();
-
-			OnCompleted.ExecuteIfBound(true);
-		})
+		)
 	);
 }
 
 void UNexusSteamUtils::GetSteamFriendsCached(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, float RefreshDelaySeconds, int32 UserIndex, FName ListName)
 {
 	const FString Key = MakeFriendsCacheKey(ListName, UserIndex);
-	const FFriendsCacheEntry* Entry = GFriendsCache.Find(Key);
-
-	const bool bFresh = (Entry != nullptr) && (FDateTime::UtcNow() - Entry->LastUpdateUtc).GetTotalSeconds() <= RefreshDelaySeconds;
-	if (bFresh)
+	if (const FFriendsCacheEntry* Entry = GFriendsCache.Find(Key))
 	{
-		OutFriends = Entry->Friends;
-		return;
+		const double Age = (FDateTime::UtcNow() - Entry->LastUpdateUtc).GetTotalSeconds();
+		if (Age <= RefreshDelaySeconds)
+		{
+			OutFriends = Entry->Friends;
+			return;
+		}
 	}
 
-	FillFriendsFromCacheOrOSS(WorldContextObject, OutFriends, UserIndex, ListName);
+	FillFriendsFromOSS(WorldContextObject, OutFriends, UserIndex, ListName);
+
 	FFriendsCacheEntry& NewEntry = GFriendsCache.FindOrAdd(Key);
 	NewEntry.Friends = OutFriends;
 	NewEntry.LastUpdateUtc = FDateTime::UtcNow();
@@ -279,39 +233,136 @@ void UNexusSteamUtils::GetSteamFriendsCached(UObject* WorldContextObject, TArray
 bool UNexusSteamUtils::InviteFriendToSession(UObject* WorldContextObject, const FUniqueNetIdRepl& FriendId, FName SessionName, int32 UserIndex)
 {
 	IOnlineSessionPtr Session = GetSession(WorldContextObject);
-	IOnlineIdentityPtr Identity = GetIdentity(WorldContextObject);
-
-	if (!Session.IsValid() || !Identity.IsValid())
+	if (!IsPtrValid(Session))
+	{
+		LOG_STEAM(Warning, TEXT("InviteFriendToSession: Session interface not available."));
 		return false;
+	}
 
-	TSharedPtr<const FUniqueNetId> LocalId = Identity->GetUniquePlayerId(UserIndex);
-	if (!LocalId.IsValid() || !FriendId.IsValid())
+	if (!FriendId.IsValid())
+	{
+		LOG_STEAM(Warning, TEXT("InviteFriendToSession: FriendId is invalid."));
 		return false;
+	}
 
-	return Session->SendSessionInviteToFriend(*LocalId, SessionName, *FriendId);
+	FNamedOnlineSession* Named = Session->GetNamedSession(SessionName);
+	if (!Named)
+	{
+		LOG_STEAM(Warning, TEXT("InviteFriendToSession: Session '%s' not found."), *SessionName.ToString());
+		return false;
+	}
+
+	const TSharedPtr<const FUniqueNetId> LocalId = GetLocalUserId(WorldContextObject, UserIndex);
+	if (!LocalId.IsValid())
+	{
+		LOG_STEAM(Warning, TEXT("InviteFriendToSession: Local user id invalid (UserIndex=%d)."), UserIndex);
+		return false;
+	}
+
+	bool bOk = Session->SendSessionInviteToFriend(UserIndex, SessionName, *FriendId.GetUniqueNetId());
+
+
+	LOG_STEAM(Log, TEXT("InviteFriendToSession(%s): %s"), *SessionName.ToString(), bOk ? TEXT("OK") : TEXT("FAILED"));
+	return bOk;
 }
 
 bool UNexusSteamUtils::ShowInviteOverlay(UObject* WorldContextObject, FName SessionName, int32 UserIndex)
 {
-	IOnlineExternalUIPtr UI = GetExternalUI(WorldContextObject);
-	return UI.IsValid() ? UI->ShowInviteUI(UserIndex, SessionName) : false;
+	IOnlineExternalUIPtr ExtUI = GetExternalUI(WorldContextObject);
+	if (!IsPtrValid(ExtUI))
+	{
+		LOG_STEAM(Warning, TEXT("ShowInviteOverlay: External UI interface not available."));
+		return false;
+	}
+
+	const bool bOk = ExtUI->ShowInviteUI(UserIndex, SessionName);
+	LOG_STEAM(Log, TEXT("ShowInviteOverlay(%s): %s"), *SessionName.ToString(), bOk ? TEXT("OK") : TEXT("FAILED"));
+	
+	return bOk;
 }
 
 bool UNexusSteamUtils::ShowProfileOverlay(UObject* WorldContextObject, const FUniqueNetIdRepl& PlayerId, int32 UserIndex)
 {
-	IOnlineExternalUIPtr UI = GetExternalUI(WorldContextObject);
-	if (!UI.IsValid() || !PlayerId.IsValid())
+	IOnlineExternalUIPtr ExtUI = GetExternalUI(WorldContextObject);
+	if (!IsPtrValid(ExtUI))
+	{
+		LOG_STEAM(Warning, TEXT("ShowProfileOverlay: External UI interface not available."));
 		return false;
+	}
 
-	IOnlineIdentityPtr Identity = GetIdentity(WorldContextObject);
-	if (!Identity.IsValid())
+	if (!PlayerId.IsValid())
+	{
+		LOG_STEAM(Warning, TEXT("ShowProfileOverlay: PlayerId invalid."));
 		return false;
+	}
 
-	TSharedPtr<const FUniqueNetId> LocalUserId = Identity->GetUniquePlayerId(UserIndex);
-	if (!LocalUserId.IsValid())
+	const TSharedPtr<const FUniqueNetId> LocalId = GetLocalUserId(WorldContextObject, UserIndex);
+	if (!LocalId.IsValid())
+	{
+		LOG_STEAM(Warning, TEXT("ShowProfileOverlay: LocalId invalid for UserIndex %d."), UserIndex);
 		return false;
+	}
 
-	return UI->ShowProfileUI(*LocalUserId, *PlayerId, FOnProfileUIClosedDelegate());
+	const bool bOk = ExtUI->ShowProfileUI(*LocalId, *PlayerId.GetUniqueNetId(), FOnProfileUIClosedDelegate());
+	LOG_STEAM(Log, TEXT("ShowProfileOverlay: %s"), bOk ? TEXT("OK") : TEXT("FAILED"));
+	
+	return bOk;
 }
 
 
+bool UNexusSteamUtils::IsSteamActive(UObject* WorldContextObject)
+{
+	IOnlineSubsystem* OSS = GetOSS(WorldContextObject);
+	if (!OSS) return false;
+
+	const FName SubsystemName = OSS->GetSubsystemName();
+	const bool bActive = (SubsystemName == STEAM_SUBSYSTEM);
+	
+	LOG_STEAM(Verbose, TEXT("IsSteamActive? %s (Subsystem=%s)"), bActive ? TEXT("Yes") : TEXT("No"), *SubsystemName.ToString());
+	return bActive;
+}
+
+bool UNexusSteamUtils::GetLocalPresence(UObject* WorldContextObject, FSteamPresence& OutPresence, int32 UserIndex)
+{
+	OutPresence = FSteamPresence{};
+
+	IOnlinePresencePtr Presence = GetPresence(WorldContextObject);
+	IOnlineIdentityPtr Identity = GetIdentity(WorldContextObject);
+
+	if (!IsPtrValid(Identity))
+	{
+		LOG_STEAM(Warning, TEXT("GetLocalPresence: Identity interface not available."));
+		return false;
+	}
+
+	const TSharedPtr<const FUniqueNetId> LocalId = Identity->GetUniquePlayerId(UserIndex);
+	if (!LocalId.IsValid())
+	{
+		LOG_STEAM(Warning, TEXT("GetLocalPresence: Local user id invalid (UserIndex=%d)."), UserIndex);
+		return false;
+	}
+	
+	if (IsPtrValid(Presence))
+	{
+		TSharedPtr<FOnlineUserPresence> Cached;
+		const EOnlineCachedResult::Type Result = Presence->GetCachedPresence(*LocalId, Cached);
+
+		if (Result == EOnlineCachedResult::Success && Cached.IsValid())
+		{
+			const FOnlineUserPresence& P = *Cached.Get();
+			OutPresence.StatusText = P.Status.StatusStr;
+			OutPresence.bIsOnline = P.bIsOnline;
+			OutPresence.bIsPlaying = P.bIsPlaying || P.bIsPlayingThisGame;
+			OutPresence.bIsJoinable = P.bIsJoinable;
+			return true;
+		}
+	}
+
+	const ELoginStatus::Type Status = Identity->GetLoginStatus(UserIndex);
+	OutPresence.bIsOnline = (Status == ELoginStatus::Type::LoggedIn);
+	OutPresence.bIsPlaying = false;
+	OutPresence.bIsJoinable = false;
+	OutPresence.StatusText = OutPresence.bIsOnline ? TEXT("Online") : TEXT("Offline");
+
+	return true;
+}
