@@ -3,6 +3,8 @@
 #include "Async/AsyncTask_DestroySession.h"
 #include "Async/AsyncTask_FindSessions.h"
 #include "Async/AsyncTask_JoinSession.h"
+#include "Filters/Rules/SessionFilterRule_Ping.h"
+#include "Filters/Rules/SessionSortRule_Ping.h"
 #include "Kismet/GameplayStatics.h"
 #include "Managers/OnlineSessionManager.h"
 #include "Utils/NexusOnlineHelpers.h"
@@ -33,19 +35,37 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 	FSessionSettingsData Settings;
 	Settings.SessionName = TEXT("DebugSession");
 	Settings.SessionType = ENexusSessionType::GameSession;
-	Settings.MaxPlayers = 4;
+	Settings.MaxPlayers = 2;
 	Settings.bIsPrivate = false;
 	Settings.bIsLAN = true;
 	Settings.MapName = TEXT("TestMap");
 	Settings.GameMode = TEXT("Default");
 
-	UAsyncTask_CreateSession* Task = UAsyncTask_CreateSession::CreateSession(GetOwningPlayer(), Settings);
+	// Filtre pour identifier la région
+	FSessionSearchFilter RegionFilter;
+	RegionFilter.Key = FName("REGION_KEY");
+	RegionFilter.Value.Type = ENexusSessionFilterValueType::String;
+	RegionFilter.Value.StringValue = TEXT("EU");
+	RegionFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
+
+	// Filtre de build/version
+	FSessionSearchFilter BuildFilter;
+	BuildFilter.Key = FName("BUILD_VERSION");
+	BuildFilter.Value.Type = ENexusSessionFilterValueType::Int32;
+	BuildFilter.Value.IntValue = 1;
+
+	TArray<FSessionSearchFilter> ExtraSettings;
+	ExtraSettings.Add(RegionFilter);
+	ExtraSettings.Add(BuildFilter);
+
+	UAsyncTask_CreateSession* Task = UAsyncTask_CreateSession::CreateSession(GetOwningPlayer(), Settings, ExtraSettings, nullptr);
 	Task->OnSuccess.AddDynamic(this, &UWBP_NexusOnlineDebug::OnCreateSuccess);
 	Task->OnFailure.AddDynamic(this, &UWBP_NexusOnlineDebug::OnCreateFailure);
 	Task->Activate();
 
 	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Attempting to create session..."));
 }
+
 
 void UWBP_NexusOnlineDebug::OnCreateSuccess()
 {
@@ -70,12 +90,43 @@ void UWBP_NexusOnlineDebug::OnCreateFailure()
 
 void UWBP_NexusOnlineDebug::OnJoinClicked()
 {
-	UAsyncTask_FindSessions* Task = UAsyncTask_FindSessions::FindSessions(GetOwningPlayer(), ENexusSessionType::GameSession, 20);
+	FSessionSearchFilter RegionFilter;
+	RegionFilter.Key = FName("REGION_KEY");
+	RegionFilter.Value.Type = ENexusSessionFilterValueType::String;
+	RegionFilter.Value.StringValue = TEXT("EU");
+	RegionFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
+
+	FSessionSearchFilter BuildFilter;
+	BuildFilter.Key = FName("BUILD_VERSION");
+	BuildFilter.Value.Type = ENexusSessionFilterValueType::Int32;
+	BuildFilter.Value.IntValue = 1;
+	BuildFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
+
+	TArray SimpleFilters = { RegionFilter, BuildFilter };
+
+	// exclure les sessions avec ping > 150ms
+	USessionFilterRule_Ping* PingRule = NewObject<USessionFilterRule_Ping>(this);
+	PingRule->MaxPing = 150;
+
+	// trier par ping croissant
+	USessionSortRule_Ping* SortByPing = NewObject<USessionSortRule_Ping>(this);
+
+	UAsyncTask_FindSessions* Task = UAsyncTask_FindSessions::FindSessions(
+		GetOwningPlayer(),
+		ENexusSessionType::GameSession,
+		20,
+		SimpleFilters,
+		{ PingRule },
+		{ SortByPing },
+		nullptr
+	);
+
 	Task->OnCompleted.AddDynamic(this, &UWBP_NexusOnlineDebug::OnFindSessionsCompleted);
 	Task->Activate();
 
-	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Searching for sessions..."));
+	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Searching for sessions with filters..."));
 }
+
 
 void UWBP_NexusOnlineDebug::OnFindSessionsCompleted(bool bWasSuccessful, const TArray<FOnlineSessionSearchResultData>& Results)
 {

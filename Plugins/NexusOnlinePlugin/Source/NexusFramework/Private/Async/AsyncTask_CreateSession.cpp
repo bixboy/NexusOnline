@@ -10,7 +10,8 @@
 #include "Kismet/GameplayStatics.h"
 
 
-UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(UObject* WorldContextObject, const FSessionSettingsData& SettingsData, const TArray<FSessionSearchFilter>& AdditionalSettings, USessionFilterPreset* Preset)
+UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(UObject* WorldContextObject, const FSessionSettingsData& SettingsData,
+	const TArray<FSessionSearchFilter>& AdditionalSettings, USessionFilterPreset* Preset)
 {
     UAsyncTask_CreateSession* Node = NewObject<UAsyncTask_CreateSession>();
     Node->WorldContextObject = WorldContextObject;
@@ -40,33 +41,82 @@ void UAsyncTask_CreateSession::Activate()
     IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
     if (!Session.IsValid())
     {
+        UE_LOG(LogNexusOnlineFilter, Error, TEXT("[NexusOnline|Filter] Invalid Online Session Interface"));
         OnFailure.Broadcast();
         return;
     }
 
     const FName InternalSessionName = NexusOnline::SessionTypeToName(Data.SessionType);
+
+    // Détruire l'ancienne session si elle existe
     if (Session->GetNamedSession(InternalSessionName))
     {
-        UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[NexusOnline|Filter] Existing %s found, destroying before recreation."), *InternalSessionName.ToString());
+        UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[NexusOnline|Filter] Existing session %s found, destroying before recreation."), *InternalSessionName.ToString());
         Session->DestroySession(InternalSessionName);
-
-        FPlatformProcess::Sleep(0.5f);
+        FPlatformProcess::Sleep(0.25f);
     }
 
+    // CONFIGURATION DE LA SESSION
+    // ──────────────────────────────────────────────
     FOnlineSessionSettings Settings;
-    Settings.bIsLANMatch = Data.bIsLAN;
-    Settings.bShouldAdvertise = !Data.bIsPrivate;
-    Settings.bUsesPresence = true;
-    Settings.bUseLobbiesIfAvailable = true;
-    Settings.bAllowJoinInProgress = true;
-    Settings.NumPublicConnections = Data.MaxPlayers;
 
-    Settings.Set("SESSION_DISPLAY_NAME", Data.SessionName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-    Settings.Set("MAP_NAME_KEY", Data.MapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-    Settings.Set("GAME_MODE_KEY", Data.GameMode, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-    Settings.Set("SESSION_TYPE_KEY", NexusOnline::SessionTypeToName(Data.SessionType).ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-    Settings.Set("USES_PRESENCE", true, EOnlineDataAdvertisementType::ViaOnlineService);
+	const bool bIsLAN = Data.bIsLAN;
+	const bool bIsPrivate = Data.bIsPrivate;
+	const bool bFriendsOnly = Data.bFriendsOnly;
+	const int32 MaxPlayers = FMath::Max(1, Data.MaxPlayers);
+	
+	Settings.bIsLANMatch = bIsLAN;
+	Settings.bUsesPresence = true;
+	Settings.bUseLobbiesIfAvailable = true;
+	Settings.bAllowJoinInProgress = false;
+	Settings.bAllowInvites = true;
 
+	Settings.NumPublicConnections = bIsPrivate ? 0 : MaxPlayers;
+	Settings.NumPrivateConnections = bIsPrivate ? MaxPlayers : 0;
+	
+	if (bFriendsOnly)
+	{
+		// Friends-only mode
+		Settings.bShouldAdvertise = true;
+		Settings.bAllowJoinViaPresence = true;
+		Settings.bAllowJoinViaPresenceFriendsOnly = true;
+		Settings.bAllowInvites = true;
+		Settings.Set(TEXT("ACCESS_TYPE"), FString(TEXT("FRIENDS_ONLY")), EOnlineDataAdvertisementType::ViaOnlineService);
+	}
+	else if (bIsPrivate)
+	{
+		// Private (invitation only)
+		Settings.bShouldAdvertise = false;
+		Settings.bAllowJoinViaPresence = false;
+		Settings.bAllowJoinViaPresenceFriendsOnly = false;
+		Settings.bAllowInvites = true;
+		Settings.Set(TEXT("ACCESS_TYPE"), FString(TEXT("PRIVATE")), EOnlineDataAdvertisementType::ViaOnlineService);
+	}
+	else
+	{
+		// Public session
+		Settings.bShouldAdvertise = true;
+		Settings.bAllowJoinViaPresence = true;
+		Settings.bAllowJoinViaPresenceFriendsOnly = false;
+		Settings.bAllowInvites = true;
+		Settings.Set(TEXT("ACCESS_TYPE"), FString(TEXT("PUBLIC")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	}
+
+    // MÉTADONNÉES
+    // ──────────────────────────────────────────────
+    Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    Settings.Set(TEXT("USES_PRESENCE"), true, EOnlineDataAdvertisementType::ViaOnlineService);
+
+    // ID de l’hôte
+    FString HostName = UGameplayStatics::GetPlatformName();
+    Settings.Set(TEXT("HOST_PLATFORM"), HostName, EOnlineDataAdvertisementType::ViaOnlineService);
+
+	
+    // APPLICATION DES FILTRES / PRÉSETS
+    // ──────────────────────────────────────────────
     TArray<FSessionSearchFilter> CombinedSettings = SessionAdditionalSettings;
     if (SessionPreset)
     {
@@ -78,13 +128,17 @@ void UAsyncTask_CreateSession::Activate()
         NexusSessionFilterUtils::ApplyFiltersToSettings(CombinedSettings, Settings);
         UE_LOG(LogNexusOnlineFilter, Log, TEXT("[NexusOnline|Filter] Applied %d custom session key/value pairs."), CombinedSettings.Num());
     }
+	
 
+    // CRÉATION DE LA SESSION
+    // ──────────────────────────────────────────────
     CreateDelegateHandle = Session->AddOnCreateSessionCompleteDelegate_Handle
-        (
+	(
         FOnCreateSessionCompleteDelegate::CreateUObject(this, &UAsyncTask_CreateSession::OnCreateSessionComplete)
     );
 
-    UE_LOG(LogNexusOnlineFilter, Log, TEXT("[NexusOnline|Filter] Creating %s (Display: %s)"), *InternalSessionName.ToString(), *Data.SessionName);
+    UE_LOG(LogNexusOnlineFilter, Log, TEXT("[NexusOnline|Filter] Creating session '%s' (%d max players, LAN=%d, Private=%d)"),
+        *InternalSessionName.ToString(), MaxPlayers, bIsLAN, bIsPrivate);
 
     if (!Session->CreateSession(0, InternalSessionName, Settings))
     {
@@ -92,6 +146,7 @@ void UAsyncTask_CreateSession::Activate()
         OnFailure.Broadcast();
     }
 }
+
 
 void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool bWasSuccessful)
 {

@@ -20,25 +20,26 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FOnSessionCreated OnFailure;
 
-        /** Crée une session à partir d'une structure de paramètres et de filtres personnalisés (Blueprint friendly). */
-        UFUNCTION(BlueprintCallable, meta=(BlueprintInternalUseOnly="true", WorldContext="WorldContextObject", AutoCreateRefTerm="AdditionalSettings"), Category="Nexus|Online|Session")
-        static UAsyncTask_CreateSession* CreateSession(UObject* WorldContextObject, const FSessionSettingsData& SettingsData, const TArray<FSessionSearchFilter>& AdditionalSettings = TArray<FSessionSearchFilter>(), USessionFilterPreset* Preset = nullptr);
+    UFUNCTION(BlueprintCallable, meta=(BlueprintInternalUseOnly="true", WorldContext="WorldContextObject", AutoCreateRefTerm="AdditionalSettings"), Category="Nexus|Online|Session")
+    static UAsyncTask_CreateSession* CreateSession(UObject* WorldContextObject, const FSessionSettingsData& SettingsData,
+    	const TArray<FSessionSearchFilter>& AdditionalSettings,
+    	USessionFilterPreset* Preset);
 
 	virtual void Activate() override;
 
 private:
-        void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
+    void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
 
-        UPROPERTY()
-        UObject* WorldContextObject;
+    UPROPERTY()
+    UObject* WorldContextObject;
 
-        FSessionSettingsData Data;
+    FSessionSettingsData Data;
 
-        UPROPERTY()
-        TArray<FSessionSearchFilter> SessionAdditionalSettings;
+    UPROPERTY()
+    TArray<FSessionSearchFilter> SessionAdditionalSettings;
 
-        UPROPERTY()
-        TObjectPtr<USessionFilterPreset> SessionPreset;
+    UPROPERTY()
+    TObjectPtr<USessionFilterPreset> SessionPreset;
 
-        FDelegateHandle CreateDelegateHandle;
+    FDelegateHandle CreateDelegateHandle;
 };
