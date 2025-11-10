@@ -4,7 +4,9 @@
 #include "Async/AsyncTask_FindSessions.h"
 #include "Async/AsyncTask_JoinSession.h"
 #include "Kismet/GameplayStatics.h"
+#include "Managers/OnlineSessionManager.h"
 #include "Utils/NexusOnlineHelpers.h"
+#include "Utils/NexusSteamUtils.h"
 
 void UWBP_NexusOnlineDebug::NativeConstruct()
 {
@@ -12,15 +14,20 @@ void UWBP_NexusOnlineDebug::NativeConstruct()
 
 	if (Button_Create)
 		Button_Create->OnClicked.AddDynamic(this, &UWBP_NexusOnlineDebug::OnCreateClicked);
+	
 	if (Button_Join)
 		Button_Join->OnClicked.AddDynamic(this, &UWBP_NexusOnlineDebug::OnJoinClicked);
+	
 	if (Button_Leave)
 		Button_Leave->OnClicked.AddDynamic(this, &UWBP_NexusOnlineDebug::OnLeaveClicked);
 
 	UpdateSessionInfo();
 }
 
+
+
 #pragma region CREATE SESSION
+
 void UWBP_NexusOnlineDebug::OnCreateClicked()
 {
 	FSessionSettingsData Settings;
@@ -43,19 +50,24 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 void UWBP_NexusOnlineDebug::OnCreateSuccess()
 {
 	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Session created successfully!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, "[DebugWidget] Session created successfully!");
 	UpdateSessionInfo();
 
-	// Ici tu n'as plus besoin d'OpenLevel si ton AsyncTask_CreateSession s'en occupe déjà.
-	// Si tu préfères le gérer ici, déplace-le juste après OnSuccess.
+	UNexusSteamUtils::ShowInviteOverlay(this, "GameSession");
 }
 
 void UWBP_NexusOnlineDebug::OnCreateFailure()
 {
 	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to create session!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "[DebugWidget] Failed to create session!");
 }
+
 #pragma endregion
 
-#pragma region 🔍 FIND & JOIN SESSION
+
+
+#pragma region FIND & JOIN SESSION
+
 void UWBP_NexusOnlineDebug::OnJoinClicked()
 {
 	UAsyncTask_FindSessions* Task = UAsyncTask_FindSessions::FindSessions(GetOwningPlayer(), ENexusSessionType::GameSession, 20);
@@ -70,6 +82,8 @@ void UWBP_NexusOnlineDebug::OnFindSessionsCompleted(bool bWasSuccessful, const T
 	if (!bWasSuccessful || Results.IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] ❌ No sessions found."));
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, "[DebugWidget] No sessions found.");
+		
 		return;
 	}
 
@@ -91,16 +105,23 @@ void UWBP_NexusOnlineDebug::OnFindSessionsCompleted(bool bWasSuccessful, const T
 void UWBP_NexusOnlineDebug::OnJoinSuccess()
 {
 	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Joined session successfully!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, "[DebugWidget] Joined session successfully!");
+
 	UpdateSessionInfo();
 }
 
 void UWBP_NexusOnlineDebug::OnJoinFailure()
 {
 	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to join session!"));
+	GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red, "[DebugWidget] Failed to join session!");
 }
+
 #pragma endregion
 
-#pragma region 🚪 LEAVE / DESTROY SESSION
+
+
+#pragma region LEAVE / DESTROY SESSION
+
 void UWBP_NexusOnlineDebug::OnLeaveClicked()
 {
 	UAsyncTask_DestroySession* Task = UAsyncTask_DestroySession::DestroySession(GetOwningPlayer(), ENexusSessionType::GameSession);
@@ -121,9 +142,13 @@ void UWBP_NexusOnlineDebug::OnLeaveFailure()
 {
 	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to destroy session!"));
 }
+
 #pragma endregion
 
-#pragma region 🧠 SESSION INFO
+
+
+#pragma region SESSION INFO
+
 void UWBP_NexusOnlineDebug::UpdateSessionInfo()
 {
 	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld());
@@ -139,7 +164,9 @@ void UWBP_NexusOnlineDebug::UpdateSessionInfo()
 			CurrentPlayers = PublicCount - OpenCount;
 			MaxPlayers = PublicCount;
 
-			UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Session: %s (%d/%d players registered, %d open slots)"), *CurrentSessionName, CurrentPlayers, MaxPlayers, OpenCount);
+			UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Session: %s (%d/%d players registered, %d open slots)"),
+				*CurrentSessionName, CurrentPlayers, MaxPlayers, OpenCount);
+			
 			return;
 		}
 	}
@@ -147,16 +174,26 @@ void UWBP_NexusOnlineDebug::UpdateSessionInfo()
 	CurrentSessionName = TEXT("No session active");
 	CurrentPlayers = 0;
 	MaxPlayers = 0;
+	
 	UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] No active session."));
 }
 
-FText UWBP_NexusOnlineDebug::GetSessionInfoText() const
+FText UWBP_NexusOnlineDebug::GetSessionInfoText()
 {
-	if (CurrentSessionName != "No session active")
+	if (AOnlineSessionManager* Manager = AOnlineSessionManager::Get(this))
 	{
-		return FText::FromString(FString::Printf(TEXT("%s (%d/%d Players)"), *CurrentSessionName, CurrentPlayers, MaxPlayers));
+		if (Manager)
+		{
+			return FText::FromString
+			(
+				FString::Printf(TEXT("%s (%d Players)"),
+				*Manager->TrackedSessionName.ToString(),
+				Manager->PlayerCount)
+			);	
+		}
 	}
 
 	return FText::FromString(TEXT("No session active"));
 }
+
 #pragma endregion

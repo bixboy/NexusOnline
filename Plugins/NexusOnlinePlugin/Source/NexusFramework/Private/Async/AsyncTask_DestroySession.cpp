@@ -1,8 +1,10 @@
 ﻿#include "Async/AsyncTask_DestroySession.h"
 #include "Utils/NexusOnlineHelpers.h"
 #include "OnlineSubsystem.h"
-#include "OnlineSubsystemUtils.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "Managers/OnlineSessionManager.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 
 UAsyncTask_DestroySession* UAsyncTask_DestroySession::DestroySession(UObject* WorldContextObject, ENexusSessionType SessionType)
 {
@@ -77,6 +79,21 @@ void UAsyncTask_DestroySession::OnDestroySessionComplete(FName SessionName, bool
 
     UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Session '%s' destruction result: %s"), *SessionName.ToString(),
         bWasSuccessful ? TEXT("SUCCESS") : TEXT("FAILURE"));
+
+    if (bWasSuccessful && World)
+    {
+        if (World->GetNetMode() != NM_Client)
+        {
+            if (AOnlineSessionManager* Manager = AOnlineSessionManager::Get(World))
+            {
+                Manager->Destroy();
+            }
+        }
+        else if (AOnlineSessionManager* Manager = AOnlineSessionManager::Get(World))
+        {
+            Manager->ForceUpdatePlayerCount();
+        }
+    }
 
     (bWasSuccessful ? OnSuccess : OnFailure).Broadcast();
 }
