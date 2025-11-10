@@ -24,7 +24,6 @@ Binaries/
 Intermediate/
 DerivedDataCache/
 Saved/
-# Catch nested plugin artifacts too (si repo mono-plugins ou multi-plugins)
 Plugins/**/Binaries/
 Plugins/**/Intermediate/
 Plugins/**/DerivedDataCache/
@@ -38,7 +37,6 @@ Saved/Autosaves/
 *.mdmp
 
 # UBT/Generated files
-# (Les .generated.h/.gen.cpp sont recréés par UHT/UBT)
 *.generated.h
 *.generated.cpp
 *.gen.cpp
@@ -64,7 +62,6 @@ Saved/Autosaves/
 # ─────────────────────────────────────────
 # Binaires packagés / distribution
 # ─────────────────────────────────────────
-# (si vous exportez des builds de démo depuis le repo)
 *.exe
 *.dll
 *.pdb
@@ -75,7 +72,7 @@ Saved/Autosaves/
 *.pak
 
 # ─────────────────────────────────────────
-# CMake / Ninja (si jamais utilisés localement)
+# CMake
 # ─────────────────────────────────────────
 CMakeCache.txt
 CMakeFiles/
