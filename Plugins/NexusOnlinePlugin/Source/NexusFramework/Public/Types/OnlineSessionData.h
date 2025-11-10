@@ -51,9 +51,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
 	bool bIsPrivate = false;
 
+	/** Session visible uniquement pour les amis */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
+	bool bFriendsOnly = false;
+
 	/** Type de session (Game, Party, etc.) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
 	ENexusSessionType SessionType = ENexusSessionType::GameSession;
+
+	/** Optional custom session ID (generated automatically if empty). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Session")
+	FString SessionId;
+
+	/** Length of random session ID to auto-generate if none provided. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Session")
+	int32 SessionIdLength = 6;
 };
 
 

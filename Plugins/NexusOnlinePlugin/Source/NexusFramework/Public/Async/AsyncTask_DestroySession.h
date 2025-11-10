@@ -7,31 +7,44 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSessionDestroyed);
 
+/**
+ * Asynchronous Blueprint node that destroys an active online session.
+ */
 UCLASS()
 class NEXUSFRAMEWORK_API UAsyncTask_DestroySession : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(BlueprintAssignable)
+
+	UPROPERTY(BlueprintAssignable, Category="Nexus|Online|Session")
 	FOnSessionDestroyed OnSuccess;
 
-	UPROPERTY(BlueprintAssignable)
+	UPROPERTY(BlueprintAssignable, Category="Nexus|Online|Session")
 	FOnSessionDestroyed OnFailure;
-
-	/** Détruit une session du type spécifié */
+	
+	/**
+	 * Creates an asynchronous task that destroys a session of the specified type.
+	 * 
+	 * @param WorldContextObject Context (World or PlayerController) for async execution.
+	 * @param SessionType Type of session to destroy (e.g., GameSession, PartySession).
+	 */
 	UFUNCTION(BlueprintCallable, meta=(BlueprintInternalUseOnly="true", WorldContext="WorldContextObject"), Category="Nexus|Online|Session")
 	static UAsyncTask_DestroySession* DestroySession(UObject* WorldContextObject, ENexusSessionType SessionType = ENexusSessionType::GameSession);
 
 	virtual void Activate() override;
 
 private:
+
+	// Internal Callbacks
 	void OnDestroySessionComplete(FName SessionName, bool bWasSuccessful);
 
+	
+	// Internal Data
 	UPROPERTY()
-	UObject* WorldContextObject;
-
-	ENexusSessionType TargetSessionType;
-
+	UObject* WorldContextObject = nullptr;
+	
+	ENexusSessionType TargetSessionType = ENexusSessionType::GameSession;
+	
 	FDelegateHandle DestroyDelegateHandle;
 };
