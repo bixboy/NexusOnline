@@ -11,9 +11,11 @@ class NEXUSFRAMEWORK_API AANexusGameMode : public AGameModeBase
 
 public:
 	virtual void BeginPlay() override;
+	virtual void PostLogin(APlayerController* NewPlayer) override;
+	virtual void Logout(AController* Exiting) override;
 
 private:
-	virtual void OnPostLogin(AController* NewPlayer) override;
+	void TryRegisterHost();
+	bool GetHostUniqueId(FUniqueNetIdRepl& OutId) const;
 
-	virtual void Logout(AController* Exiting) override;
 };

@@ -1,84 +1,84 @@
 ﻿#include "ANexusGameMode.h"
 #include "EngineUtils.h"
+#include "OnlineSessionSettings.h"
+#include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
-#include "Managers/OnlineSessionManager.h"
-#include "TimerManager.h"
+#include "Interfaces/OnlineIdentityInterface.h"
+#include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerState.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "Managers/OnlineSessionManager.h"
+
 
 void AANexusGameMode::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
+    if (!HasAuthority()) return;
 
-	if (!HasAuthority())
-		return;
+    UWorld* World = GetWorld();
+    if (!ensure(World))
+        return;
 
-	UWorld* World = GetWorld();
-	if (!ensure(World))
-		return;
+    // -- Spawn manager
+    AOnlineSessionManager* ExistingManager = nullptr;
+    for (TActorIterator<AOnlineSessionManager> It(World); It; ++It)
+    {
+        ExistingManager = *It; break;
+    }
 
-	AOnlineSessionManager* ExistingManager = nullptr;
-	for (TActorIterator<AOnlineSessionManager> It(World); It; ++It)
-	{
-		ExistingManager = *It;
-		break;
-	}
+    if (!ExistingManager)
+    {
+        FActorSpawnParameters Params;
+        Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        Params.Name = FName(TEXT("OnlineSessionManagerRuntime"));
+        ExistingManager = World->SpawnActor<AOnlineSessionManager>(AOnlineSessionManager::StaticClass(), FTransform::Identity, Params);
+        if (ExistingManager)
+        {
+            ExistingManager->TrackedSessionName = NAME_GameSession;
+            ExistingManager->SetReplicates(true);
+            ExistingManager->SetActorHiddenInGame(true);
+            UE_LOG(LogTemp, Log, TEXT("[NexusOnline] ✅ OnlineSessionManager spawned in GameMode."));
+        }
+    }
 
-	if (!ExistingManager)
-	{
-		FActorSpawnParameters Params;
-		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		Params.Name = FName(TEXT("OnlineSessionManagerRuntime"));
-		Params.bNoFail = true;
+    // -- Register host first
+    GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+    {
+        TryRegisterHost();
 
-		ExistingManager = World->SpawnActor<AOnlineSessionManager>(
-			AOnlineSessionManager::StaticClass(),
-			FTransform::Identity,
-			Params
-		);
+        // Delay StartSession slightly until host is registered
+        GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+        {
+            if (IOnlineSessionPtr Session = Online::GetSessionInterface(GetWorld()); Session.IsValid())
+            {
+                const FName SessionName = NAME_GameSession;
+                const EOnlineSessionState::Type State = Session->GetSessionState(SessionName);
 
-		if (ExistingManager)
-		{
-			ExistingManager->TrackedSessionName = NAME_GameSession;
-			ExistingManager->SetReplicates(true);
-			ExistingManager->SetActorHiddenInGame(true);
-
-			UE_LOG(LogTemp, Log, TEXT("[NexusOnline] ✅ OnlineSessionManager spawned in GameMode."));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[NexusOnline] ❌ Failed to spawn OnlineSessionManager!"));
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Log, TEXT("[NexusOnline] Using existing OnlineSessionManager: %s"), *ExistingManager->GetName());
-	}
-
-	if (ExistingManager)
-	{
-		World->GetTimerManager().SetTimerForNextTick(
-			FTimerDelegate::CreateWeakLambda(ExistingManager, [ExistingManager]()
-			{
-				if (ExistingManager->HasAuthority())
-					ExistingManager->ForceUpdatePlayerCount();
-			})
-		);
-	}
+                if (State == EOnlineSessionState::Pending)
+                {
+                    const bool bOk = Session->StartSession(SessionName);
+                    UE_LOG(LogTemp, Log, TEXT("[NexusOnline] ✅ StartSession('%s') after host register -> %s"), *SessionName.ToString(), bOk ? TEXT("OK") : TEXT("FAIL"));
+                }
+            }
+        }));
+    }));
 }
 
-void AANexusGameMode::OnPostLogin(AController* NewPlayer)
-{
-	Super::OnPostLogin(NewPlayer);
 
+
+
+void AANexusGameMode::PostLogin(APlayerController* NewPlayer)
+{
+	Super::PostLogin(NewPlayer);
+	
 	IOnlineSessionPtr Session = Online::GetSessionInterface(GetWorld());
-	if (Session.IsValid())
+	if (Session.IsValid() && NewPlayer && NewPlayer->PlayerState)
 	{
-		FUniqueNetIdRepl PlayerId = NewPlayer->PlayerState->GetUniqueId();
-		if (PlayerId.IsValid())
+		FUniqueNetIdRepl Id = NewPlayer->PlayerState->GetUniqueId();
+		if (Id.IsValid())
 		{
-			Session->RegisterPlayer(NAME_GameSession, *PlayerId, false);
-			UE_LOG(LogTemp, Log, TEXT("✅ Registered player %s to session."), *PlayerId->ToString());
+			Session->RegisterPlayer(NAME_GameSession, *Id, /*bWasInvited*/ false);
+			Session->UpdateSession(NAME_GameSession, Session->GetNamedSession(NAME_GameSession)->SessionSettings, /*bShouldRefreshOnlineData*/ true);
 		}
 	}
 }
@@ -86,18 +86,89 @@ void AANexusGameMode::OnPostLogin(AController* NewPlayer)
 void AANexusGameMode::Logout(AController* Exiting)
 {
 	Super::Logout(Exiting);
-
+	
 	IOnlineSessionPtr Session = Online::GetSessionInterface(GetWorld());
 	if (Session.IsValid())
 	{
-		if (APlayerState* PS = Exiting->GetPlayerState<APlayerState>())
+		if (APlayerState* PS = Exiting ? Exiting->GetPlayerState<APlayerState>() : nullptr)
 		{
-			FUniqueNetIdRepl PlayerId = PS->GetUniqueId();
-			if (PlayerId.IsValid())
+			FUniqueNetIdRepl Id = PS->GetUniqueId(); if (Id.IsValid())
 			{
-				Session->UnregisterPlayer(NAME_GameSession, *PlayerId);
-				UE_LOG(LogTemp, Log, TEXT("Unregistered player %s from session."), *PlayerId->ToString());
+				Session->UnregisterPlayer(NAME_GameSession, *Id);
+				Session->UpdateSession(NAME_GameSession, Session->GetNamedSession(NAME_GameSession)->SessionSettings, true);
 			}
 		}
 	}
 }
+
+
+// ---- récupérer l'UniqueId de l’hôte ----
+bool AANexusGameMode::GetHostUniqueId(FUniqueNetIdRepl& OutId) const
+{
+    if (APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+    {
+        if (APlayerState* PS = PC->PlayerState)
+        {
+            FUniqueNetIdRepl Id = PS->GetUniqueId();
+            if (Id.IsValid())
+            {
+                OutId = Id;
+                return true;
+            }
+        }
+    }
+
+    if (ULocalPlayer* LP = GetWorld() ? GetWorld()->GetFirstLocalPlayerFromController() : nullptr)
+    {
+        const FUniqueNetIdPtr Pref = LP->GetPreferredUniqueNetId().GetUniqueNetId();
+        if (Pref.IsValid())
+        {
+            OutId = FUniqueNetIdRepl(Pref.ToSharedRef());
+            return true;
+        }
+    }
+
+    if (IOnlineSubsystem* OSS = Online::GetSubsystem(GetWorld()))
+    {
+        if (IOnlineIdentityPtr Identity = OSS->GetIdentityInterface())
+        {
+            FUniqueNetIdPtr Id = Identity->GetUniquePlayerId(0);
+            if (Id.IsValid())
+            {
+                OutId = FUniqueNetIdRepl(Id.ToSharedRef());
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// ---- register l’hôte s’il ne l’est pas déjà ----
+void AANexusGameMode::TryRegisterHost()
+{
+	IOnlineSessionPtr Session = Online::GetSessionInterface(GetWorld());
+	if (!Session.IsValid())
+		return;
+
+	FNamedOnlineSession* Named = Session->GetNamedSession(NAME_GameSession);
+	if (!Named)
+		return;
+
+	if (GetNumPlayers() > 0)
+	{
+		FUniqueNetIdRepl HostId;
+		if (GetHostUniqueId(HostId))
+		{
+			Session->RegisterPlayer(NAME_GameSession, *HostId, false);
+			Session->UpdateSession(NAME_GameSession, Named->SessionSettings, true);
+			UE_LOG(LogTemp, Log, TEXT("[NexusOnline] ✅ Host registered into session (%d max players)."),
+				Named->SessionSettings.NumPublicConnections);
+		}
+		else
+		{
+			GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]{ TryRegisterHost(); }));
+		}
+	}
+}
+

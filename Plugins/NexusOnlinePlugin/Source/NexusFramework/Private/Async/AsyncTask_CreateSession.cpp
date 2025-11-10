@@ -68,7 +68,7 @@ void UAsyncTask_CreateSession::Activate()
 	Settings.bIsLANMatch = bIsLAN;
 	Settings.bUsesPresence = true;
 	Settings.bUseLobbiesIfAvailable = true;
-	Settings.bAllowJoinInProgress = false;
+	Settings.bAllowJoinInProgress = true;
 	Settings.bAllowInvites = true;
 
 	Settings.NumPublicConnections = bIsPrivate ? 0 : MaxPlayers;
