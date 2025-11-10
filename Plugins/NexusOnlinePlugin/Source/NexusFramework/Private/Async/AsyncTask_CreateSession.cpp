@@ -88,22 +88,15 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
     }
     else
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "[NexusOnline] ❌ SessionInterface invalid!");
     	OnFailure.Broadcast();
         return;
     }
 
     if (!bWasSuccessful)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "❌ CreateSession failed!");
-
         OnFailure.Broadcast();
         return;
     }
-
-    // Succès
-    GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green,
-    	FString::Printf(TEXT("✅ Session '%s' created, opening '%s' (listen)"), *SessionName.ToString(), *Data.MapName));
 
     OnSuccess.Broadcast();
     UGameplayStatics::OpenLevel(World, FName(*Data.MapName), true, "listen");

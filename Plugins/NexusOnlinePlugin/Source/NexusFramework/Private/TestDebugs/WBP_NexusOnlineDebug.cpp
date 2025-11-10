@@ -35,7 +35,7 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 	Settings.SessionType = ENexusSessionType::GameSession;
 	Settings.MaxPlayers = 4;
 	Settings.bIsPrivate = false;
-	Settings.bIsLAN = false;
+	Settings.bIsLAN = true;
 	Settings.MapName = TEXT("TestMap");
 	Settings.GameMode = TEXT("Default");
 
@@ -50,6 +50,7 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 void UWBP_NexusOnlineDebug::OnCreateSuccess()
 {
 	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Session created successfully!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, "[DebugWidget] Session created successfully!");
 	UpdateSessionInfo();
 
 	UNexusSteamUtils::ShowInviteOverlay(this, "GameSession");
@@ -58,6 +59,7 @@ void UWBP_NexusOnlineDebug::OnCreateSuccess()
 void UWBP_NexusOnlineDebug::OnCreateFailure()
 {
 	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to create session!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "[DebugWidget] Failed to create session!");
 }
 
 #pragma endregion
@@ -80,6 +82,8 @@ void UWBP_NexusOnlineDebug::OnFindSessionsCompleted(bool bWasSuccessful, const T
 	if (!bWasSuccessful || Results.IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] ❌ No sessions found."));
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, "[DebugWidget] No sessions found.");
+		
 		return;
 	}
 
@@ -101,6 +105,7 @@ void UWBP_NexusOnlineDebug::OnFindSessionsCompleted(bool bWasSuccessful, const T
 void UWBP_NexusOnlineDebug::OnJoinSuccess()
 {
 	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Joined session successfully!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, "[DebugWidget] Joined session successfully!");
 
 	UpdateSessionInfo();
 }
@@ -108,6 +113,7 @@ void UWBP_NexusOnlineDebug::OnJoinSuccess()
 void UWBP_NexusOnlineDebug::OnJoinFailure()
 {
 	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to join session!"));
+	GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red, "[DebugWidget] Failed to join session!");
 }
 
 #pragma endregion
