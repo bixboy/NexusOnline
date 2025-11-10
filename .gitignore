@@ -19,7 +19,6 @@ $RECYCLE.BIN/
 # ─────────────────────────────────────────
 # Unreal Engine (plugin repo)
 # ─────────────────────────────────────────
-# Build artifacts & caches
 Binaries/
 Intermediate/
 DerivedDataCache/
@@ -44,7 +43,6 @@ Saved/Autosaves/
 # ─────────────────────────────────────────
 # Project files générés
 # ─────────────────────────────────────────
-# Solutions/Projets (générés par Unreal / IDE)
 *.sln
 *.suo
 *.vcxproj
