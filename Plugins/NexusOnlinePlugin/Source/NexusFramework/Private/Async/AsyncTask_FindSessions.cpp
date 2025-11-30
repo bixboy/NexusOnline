@@ -20,6 +20,7 @@ UAsyncTask_FindSessions* UAsyncTask_FindSessions::FindSessions(
 	UObject* WorldContextObject,
 	ENexusSessionType SessionType,
 	int32 MaxResults,
+	bool bIsLANQuery,
 	const TArray<FSessionSearchFilter>& SimpleFilters,
 	const TArray<USessionFilterRule*>& AdvancedRules,
 	const TArray<USessionSortRule*>& SortRules,
@@ -33,7 +34,7 @@ UAsyncTask_FindSessions* UAsyncTask_FindSessions::FindSessions(
 	// Configure online search
 	Node->SearchSettings = MakeShareable(new FOnlineSessionSearch());
 	Node->SearchSettings->MaxSearchResults = MaxResults;
-	Node->SearchSettings->bIsLanQuery = true;
+	Node->SearchSettings->bIsLanQuery = bIsLANQuery;
 
 	// Store user-defined configuration
 	Node->UserSimpleFilters = SimpleFilters;
@@ -128,6 +129,8 @@ void UAsyncTask_FindSessions::OnFindSessionsComplete(bool bWasSuccessful)
 		return;
 	}
 
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Search completed. Raw results found: %d"), SearchSettings->SearchResults.Num());
+
 	ProcessSearchResults(SearchSettings->SearchResults);
 }
 
@@ -163,15 +166,23 @@ void UAsyncTask_FindSessions::ProcessSearchResults(const TArray<FOnlineSessionSe
 
 		for (const FOnlineSessionSearchResult& Result : InResults)
 		{
-			// Match type
+			FString ResultId = Result.GetSessionIdStr();
 			FString FoundType;
 			Result.Session.SessionSettings.Get(TEXT("SESSION_TYPE_KEY"), FoundType);
+
+			// Match type
 			if (!FoundType.IsEmpty() && FoundType != DesiredTypeStr)
+			{
+				UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Rejected '%s' (Type mismatch: %s != %s)"), *ResultId, *FoundType, *DesiredTypeStr);
 				continue;
+			}
 
 			// Simple filters
 			if (!NexusSessionFilterUtils::PassesAllFilters(SimpleFiltersCopy, Result))
+			{
+				UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Rejected '%s' (Failed simple filters)"), *ResultId);
 				continue;
+			}
 
 			// Advanced rules
 			bool bRejected = false;
@@ -180,12 +191,14 @@ void UAsyncTask_FindSessions::ProcessSearchResults(const TArray<FOnlineSessionSe
 				const USessionFilterRule* RuleInstance = RuleWeak.Get();
 				if (RuleInstance && RuleInstance->bEnabled && !RuleInstance->PassesFilter(Result))
 				{
+					UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Rejected '%s' (Failed rule: %s)"), *ResultId, *RuleInstance->GetRuleDescription());
 					bRejected = true;
 					break;
 				}
 			}
 			if (bRejected) continue;
 
+			UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Accepted session '%s'"), *ResultId);
 			FilteredResults.Add(Result);
 		}
 
@@ -262,6 +275,7 @@ void UAsyncTask_FindSessions::RebuildResolvedFilters()
 	{
 		return A && B ? (A->Priority < B->Priority) : (B != nullptr);
 	});
+	
 	ResolvedSortRules.Sort([](const TObjectPtr<USessionSortRule>& A, const TObjectPtr<USessionSortRule>& B)
 	{
 		return A && B ? (A->Priority < B->Priority) : (B != nullptr);
@@ -277,8 +291,10 @@ void UAsyncTask_FindSessions::ApplyQueryFilters()
 		return;
 
 	SearchSettings->QuerySettings.Set(TEXT("SEARCH_PRESENCE"), true, EOnlineComparisonOp::Equals);
+	SearchSettings->QuerySettings.Set(TEXT("SEARCH_LOBBIES"), true, EOnlineComparisonOp::Equals);
 	SearchSettings->QuerySettings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(DesiredType).ToString(), EOnlineComparisonOp::Equals);
-
+	SearchSettings->MaxSearchResults = 9999; 
+	
 	NexusSessionFilterUtils::ApplyFiltersToSettings(ResolvedSimpleFilters, *SearchSettings);
 
 	for (const TObjectPtr<USessionFilterRule>& Rule : ResolvedAdvancedRules)

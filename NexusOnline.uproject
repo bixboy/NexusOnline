@@ -33,10 +33,6 @@
 		{
 			"Name": "OnlineSubsystemUtils",
 			"Enabled": true
-		},
-		{
-			"Name": "SteamSockets",
-			"Enabled": true
 		}
 	]
 }

@@ -53,6 +53,7 @@ public:
 		UObject* WorldContextObject,
 		ENexusSessionType SessionType,
 		int32 MaxResults,
+		bool bIsLANQuery,
 		const TArray<FSessionSearchFilter>& SimpleFilters,
 		const TArray<USessionFilterRule*>& AdvancedRules,
 		const TArray<USessionSortRule*>& SortRules,

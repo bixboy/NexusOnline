@@ -27,13 +27,10 @@ public class NexusFramework : ModuleRules
 
 	    PublicIncludePaths.AddRange(new string[]
 	    {
-		    "NexusFramework/Private",
-		    "NexusFramework/Private/Async"
 	    });
 
 	    PrivateIncludePaths.AddRange(new string[]
 	    {
-		    "NexusOnlineFramework/Private"
 	    });
     }
 }

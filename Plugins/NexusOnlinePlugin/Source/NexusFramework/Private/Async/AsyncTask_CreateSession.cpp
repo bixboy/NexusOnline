@@ -14,8 +14,7 @@
 // ──────────────────────────────────────────────
 // Create and configure async node
 // ──────────────────────────────────────────────
-UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(
-	UObject* WorldContextObject,
+UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(UObject* WorldContextObject,
 	const FSessionSettingsData& SettingsData,
 	const TArray<FSessionSearchFilter>& AdditionalSettings,
 	USessionFilterPreset* Preset)
@@ -81,7 +80,6 @@ void UAsyncTask_CreateSession::Activate()
 	Settings.bUsesPresence = true;
 	Settings.bUseLobbiesIfAvailable = true;
 	Settings.bAllowJoinInProgress = true;
-	Settings.bAllowInvites = true;
 
 	Settings.NumPublicConnections = bIsPrivate ? 0 : MaxPlayers;
 	Settings.NumPrivateConnections = bIsPrivate ? MaxPlayers : 0;
@@ -95,7 +93,7 @@ void UAsyncTask_CreateSession::Activate()
 		Settings.bAllowJoinViaPresence = true;
 		Settings.bAllowJoinViaPresenceFriendsOnly = true;
 		Settings.bAllowInvites = true;
-		Settings.Set(TEXT("ACCESS_TYPE"), FString("PUBLIC"), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+		Settings.Set(TEXT("ACCESS_TYPE"), FString("FRIENDS_ONLY"), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	}
 	else if (bIsPrivate)
 	{
@@ -111,7 +109,7 @@ void UAsyncTask_CreateSession::Activate()
 		Settings.bAllowJoinViaPresence = true;
 		Settings.bAllowJoinViaPresenceFriendsOnly = false;
 		Settings.bAllowInvites = true;
-		Settings.Set(TEXT("ACCESS_TYPE"), FString("FRIENDS_ONLY"), EOnlineDataAdvertisementType::ViaOnlineService);
+		Settings.Set(TEXT("ACCESS_TYPE"), FString("PUBLIC"), EOnlineDataAdvertisementType::ViaOnlineService);
 	}
 
 	// ──────────────────────────────────────────────
@@ -123,6 +121,7 @@ void UAsyncTask_CreateSession::Activate()
 	Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	Settings.Set(TEXT("USES_PRESENCE"), true, EOnlineDataAdvertisementType::ViaOnlineService);
 	Settings.Set(TEXT("HOST_PLATFORM"), UGameplayStatics::GetPlatformName(), EOnlineDataAdvertisementType::ViaOnlineService);
+	Settings.Set(NexusOnline::SESSION_KEY_PROJECT_ID_INT, NexusOnline::PROJECT_ID_VALUE_INT, EOnlineDataAdvertisementType::ViaOnlineService);
 
 	// ──────────────────────────────────────────────
 	// Merge user filters and preset filters
@@ -192,9 +191,13 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
 		return;
 	}
 
-	// Success — broadcast and travel to map as host
-	
 	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] ✅ Session '%s' created successfully."), *SessionName.ToString());
+    
+	if (Session.IsValid())
+	{
+		Session->StartSession(SessionName);
+	}
+
 	OnSuccess.Broadcast();
 
 	if (World)

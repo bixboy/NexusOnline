@@ -41,17 +41,10 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 	Settings.SessionType = ENexusSessionType::GameSession;
 	Settings.MaxPlayers = 2;
 	Settings.bIsPrivate = false;
-	Settings.bIsLAN = true;
+	Settings.bIsLAN = false;
 	Settings.MapName = TEXT("TestMap");
 	Settings.GameMode = TEXT("Default");
 	Settings.SessionIdLength = 15;
-
-	// Region filter
-	FSessionSearchFilter RegionFilter;
-	RegionFilter.Key = FName("REGION_KEY");
-	RegionFilter.Value.Type = ENexusSessionFilterValueType::String;
-	RegionFilter.Value.StringValue = TEXT("EU");
-	RegionFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
 
 	// Build version filter
 	FSessionSearchFilter BuildFilter;
@@ -59,7 +52,7 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 	BuildFilter.Value.Type = ENexusSessionFilterValueType::Int32;
 	BuildFilter.Value.IntValue = 1;
 
-	TArray ExtraSettings = { RegionFilter, BuildFilter };
+	TArray ExtraSettings = { BuildFilter };
 
 	// Launch async task
 	UAsyncTask_CreateSession* Task = UAsyncTask_CreateSession::CreateSession(GetOwningPlayer(), Settings, ExtraSettings, nullptr);
@@ -91,19 +84,19 @@ void UWBP_NexusOnlineDebug::OnCreateFailure()
 void UWBP_NexusOnlineDebug::OnJoinClicked()
 {
 	// Basic filters
-	FSessionSearchFilter RegionFilter;
-	RegionFilter.Key = FName("REGION_KEY");
-	RegionFilter.Value.Type = ENexusSessionFilterValueType::String;
-	RegionFilter.Value.StringValue = TEXT("EU");
-	RegionFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
-
 	FSessionSearchFilter BuildFilter;
 	BuildFilter.Key = FName("BUILD_VERSION");
 	BuildFilter.Value.Type = ENexusSessionFilterValueType::Int32;
 	BuildFilter.Value.IntValue = 1;
 	BuildFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
 
-	TArray SimpleFilters = { RegionFilter, BuildFilter };
+	FSessionSearchFilter PIDFilter;
+	PIDFilter.Key = NexusOnline::SESSION_KEY_PROJECT_ID_INT;
+	PIDFilter.Value.Type = ENexusSessionFilterValueType::Int32;
+	PIDFilter.Value.IntValue = NexusOnline::PROJECT_ID_VALUE_INT;
+	PIDFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
+
+	TArray SimpleFilters = {BuildFilter, PIDFilter };
 
 	// Advanced ping rule (exclude >150ms)
 	USessionFilterRule_Ping* PingRule = NewObject<USessionFilterRule_Ping>(this);
@@ -116,10 +109,11 @@ void UWBP_NexusOnlineDebug::OnJoinClicked()
 	UAsyncTask_FindSessions* Task = UAsyncTask_FindSessions::FindSessions(
 		GetOwningPlayer(),
 		ENexusSessionType::GameSession,
-		20,
+		9999,
+		false,
 		SimpleFilters,
-		{ PingRule },
-		{ SortByPing },
+		{ }, // No advanced rules
+		{ }, // No sort rules
 		nullptr
 	);
 
