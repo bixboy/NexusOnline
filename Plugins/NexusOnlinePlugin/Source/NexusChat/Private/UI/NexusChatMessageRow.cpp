@@ -1,5 +1,6 @@
 #include "UI/NexusChatMessageRow.h"
 
+
 void UNexusChatMessageRow::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -32,7 +33,12 @@ void UNexusChatMessageRow::InitWidget_Implementation(const FNexusChatMessage& Me
 	}
 	else
 	{
-		FullText = FString::Printf(TEXT("<%s>%s: %s</>"), *StyleName.ToString(), *Message.SenderName, *Message.MessageContent);
+		FString SenderName = Message.SenderName;
+		if (SenderName.Len() > 10)
+		{
+			SenderName = SenderName.Left(10) + "...";
+		}
+		FullText = FString::Printf(TEXT("<%s>%s: %s</>"), *StyleName.ToString(), *SenderName, *Message.MessageContent);
 	}
 
 	MessageText->SetText(FText::FromString(FullText));
