@@ -5,6 +5,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
 #include "Types/NexusChatTypes.h"
+#include "Core/NexusChatSubsystem.h"
 
 
 const float UNexusChatComponent::SpamCooldown = 0.5f;
@@ -23,6 +24,20 @@ void UNexusChatComponent::BeginPlay()
 {
     Super::BeginPlay();
     RegisterCommands();
+
+    if (GetOwner()->HasAuthority())
+    {
+        if (UWorld* World = GetWorld())
+        {
+            if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
+            {
+                for (const FNexusChatMessage& Msg : ChatSubsystem->GetHistory())
+                {
+                    Client_ReceiveChatMessage(Msg);
+                }
+            }
+        }
+    }
 }
 
 void UNexusChatComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -154,6 +169,12 @@ void UNexusChatComponent::Client_ReceiveChatMessage_Implementation(const FNexusC
         LastWhisperSender = Message.SenderName;
     }
     
+    ClientChatHistory.Add(Message);
+    if (ClientChatHistory.Num() > 100)
+    {
+        ClientChatHistory.RemoveAt(0);
+    }
+    
     OnMessageReceived.Broadcast(Message);
 }
 
@@ -214,6 +235,15 @@ void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
             {
                 ChatComp->Client_ReceiveChatMessage(Msg);
             }
+        }
+    }
+
+    // Store in History (Server Only)
+    if (Msg.Channel == ENexusChatChannel::Global || Msg.Channel == ENexusChatChannel::GameLog)
+    {
+        if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
+        {
+            ChatSubsystem->AddMessage(Msg);
         }
     }
 }

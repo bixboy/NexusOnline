@@ -61,6 +61,12 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Nexus|Online")
 	int32 MaxPlayers = 0;
 
+	UPROPERTY(EditAnywhere, Category = "Nexus|Online")
+	FString MapName = TEXT("TestMap");
+
+	UPROPERTY(EditAnywhere, Category = "Nexus|Online")
+	bool IsLan = false;
+
 	
 	virtual void NativeConstruct() override;
 

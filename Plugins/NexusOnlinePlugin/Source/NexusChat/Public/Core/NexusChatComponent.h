@@ -38,6 +38,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "NexusChat")
     int32 GetTeamId() const { return TeamId; }
 
+    UFUNCTION(BlueprintPure, Category = "NexusChat")
+    const TArray<FNexusChatMessage>& GetClientChatHistory() const { return ClientChatHistory; }
+
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "NexusChat")
     void BroadcastGameLog(const FString& Content, FLinearColor LogColor = FLinearColor::White);
 
@@ -86,4 +89,7 @@ private:
 
     // --- Constants ---
     static const float SpamCooldown;
+
+    UPROPERTY()
+    TArray<FNexusChatMessage> ClientChatHistory;
 };

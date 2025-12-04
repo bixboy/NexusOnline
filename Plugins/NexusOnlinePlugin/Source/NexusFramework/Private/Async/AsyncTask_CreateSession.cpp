@@ -71,14 +71,23 @@ void UAsyncTask_CreateSession::Activate()
 	// ──────────────────────────────────────────────
 	FOnlineSessionSettings Settings;
 
-	const bool bIsLAN = Data.bIsLAN;
+	// Detect NULL subsystem
+	const IOnlineSubsystem* Subsystem = Online::GetSubsystem(World);
+	const bool bIsNullSubsystem = Subsystem && Subsystem->GetSubsystemName() == TEXT("NULL");
+	
+	if (bIsNullSubsystem)
+	{
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[CreateSession] 'NULL' subsystem detected. Forcing LAN match, disabling Lobbies, and minimizing packet size."));
+	}
+
+	const bool bIsLAN = bIsNullSubsystem ? true : Data.bIsLAN; // Force LAN on NULL
 	const bool bIsPrivate = Data.bIsPrivate;
 	const bool bFriendsOnly = Data.bFriendsOnly;
 	const int32 MaxPlayers = FMath::Max(1, Data.MaxPlayers);
 
 	Settings.bIsLANMatch = bIsLAN;
 	Settings.bUsesPresence = true;
-	Settings.bUseLobbiesIfAvailable = true;
+	Settings.bUseLobbiesIfAvailable = bIsNullSubsystem ? false : true; // Disable Lobbies on NULL
 	Settings.bAllowJoinInProgress = true;
 
 	Settings.NumPublicConnections = bIsPrivate ? 0 : MaxPlayers;
@@ -115,14 +124,21 @@ void UAsyncTask_CreateSession::Activate()
 	// ──────────────────────────────────────────────
 	// Metadata
 	// ──────────────────────────────────────────────
-	Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	// Optimization: On NULL subsystem, avoid putting too much data in the Ping packet (LAN beacon) to prevent drops.
+	const EOnlineDataAdvertisementType::Type AdType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
+	
+	// For NULL, we even move the Session Type to ViaOnlineService to ensure the packet is as small as possible.
+	// This means FindSessions must be lenient with type checking on NULL.
+	const EOnlineDataAdvertisementType::Type CriticalAdType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
+
+	Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, AdType);
+	Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, AdType);
+	Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, AdType);
+	Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), CriticalAdType);
 	Settings.Set(TEXT("USES_PRESENCE"), true, EOnlineDataAdvertisementType::ViaOnlineService);
 	Settings.Set(TEXT("HOST_PLATFORM"), UGameplayStatics::GetPlatformName(), EOnlineDataAdvertisementType::ViaOnlineService);
-	Settings.Set(NexusOnline::SESSION_KEY_PROJECT_ID_INT, NexusOnline::PROJECT_ID_VALUE_INT, EOnlineDataAdvertisementType::ViaOnlineService);
-
+	Settings.Set(FName("BUILD_VERSION"), 1, AdType);
+	Settings.Set(NexusOnline::SESSION_KEY_PROJECT_ID_INT, NexusOnline::PROJECT_ID_VALUE_INT, AdType);
 	// ──────────────────────────────────────────────
 	// Merge user filters and preset filters
 	// ──────────────────────────────────────────────

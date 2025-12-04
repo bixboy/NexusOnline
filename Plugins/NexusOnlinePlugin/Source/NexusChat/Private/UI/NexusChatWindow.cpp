@@ -13,6 +13,12 @@ void UNexusChatWindow::NativeConstruct()
 		if (ChatComponent)
 		{
 			ChatComponent->OnMessageReceived.AddDynamic(this, &UNexusChatWindow::HandleMessageReceived);
+			
+			// Populate history
+			for (const FNexusChatMessage& Msg : ChatComponent->GetClientChatHistory())
+			{
+				HandleMessageReceived(Msg);
+			}
 		}
 	}
 

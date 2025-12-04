@@ -39,10 +39,10 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 	FSessionSettingsData Settings;
 	Settings.SessionName = TEXT("DebugSession");
 	Settings.SessionType = ENexusSessionType::GameSession;
-	Settings.MaxPlayers = 2;
+	Settings.MaxPlayers = 5;
 	Settings.bIsPrivate = false;
-	Settings.bIsLAN = false;
-	Settings.MapName = TEXT("TestMap");
+	Settings.bIsLAN = IsLan;
+	Settings.MapName = MapName;
 	Settings.GameMode = TEXT("Default");
 	Settings.SessionIdLength = 15;
 
@@ -102,18 +102,15 @@ void UWBP_NexusOnlineDebug::OnJoinClicked()
 	USessionFilterRule_Ping* PingRule = NewObject<USessionFilterRule_Ping>(this);
 	PingRule->MaxPing = 150;
 
-	// Sort sessions by lowest ping first
-	USessionSortRule_Ping* SortByPing = NewObject<USessionSortRule_Ping>(this);
-
 	// Launch search
 	UAsyncTask_FindSessions* Task = UAsyncTask_FindSessions::FindSessions(
 		GetOwningPlayer(),
 		ENexusSessionType::GameSession,
 		9999,
-		false,
+		IsLan,
 		SimpleFilters,
-		{ }, // No advanced rules
-		{ }, // No sort rules
+		{ },
+		{ },
 		nullptr
 	);
 
