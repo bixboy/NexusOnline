@@ -10,7 +10,8 @@ enum class ENexusChatChannel : uint8
 	Team		UMETA(DisplayName = "Team"),
 	Party		UMETA(DisplayName = "Party"),
 	Whisper		UMETA(DisplayName = "Whisper"),
-	System		UMETA(DisplayName = "System")
+	System		UMETA(DisplayName = "System"),
+	GameLog		UMETA(DisplayName = "GameLog")
 };
 
 USTRUCT(BlueprintType)

@@ -48,6 +48,38 @@ void UNexusChatComponent::SetTeamId(int32 NewTeamId)
     TeamId = NewTeamId;
 }
 
+void UNexusChatComponent::BroadcastGameLog(const FString& Content, FLinearColor LogColor)
+{
+    if (!GetOwner()->HasAuthority())
+    {
+        return;
+    }
+
+    if (Content.IsEmpty())
+    {
+        return;
+    }
+
+    FString FinalContent = Content;
+    
+    // Apply color formatting if not white
+    if (LogColor != FLinearColor::White)
+    {
+        FString HexColor = LogColor.ToFColor(true).ToHex();
+        FinalContent = FString::Printf(TEXT("<span color=\"#%s\">%s</span>"), *HexColor, *Content);
+    }
+
+    FinalContent = DecorateMessage(FinalContent, ENexusChatChannel::GameLog);
+
+    FNexusChatMessage Msg;
+    Msg.SenderName = TEXT("GAME");
+    Msg.Channel = ENexusChatChannel::GameLog;
+    Msg.Timestamp = FDateTime::UtcNow();
+    Msg.MessageContent = FinalContent;
+
+    RouteMessage(Msg);
+}
+
 void UNexusChatComponent::RegisterExternalCommand(const FString& Command, FChatCommandDelegate Callback)
 {
     if (Command.IsEmpty())
@@ -153,6 +185,7 @@ void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
             {
                 case ENexusChatChannel::Global:
                 case ENexusChatChannel::System:
+                case ENexusChatChannel::GameLog:
                     bShouldSend = true;
                     break;
                 
@@ -334,6 +367,10 @@ FString UNexusChatComponent::DecorateMessage(const FString& Message, ENexusChatC
         
         case ENexusChatChannel::System:
             Prefix = "[SYSTEM] ";
+            break;
+
+        case ENexusChatChannel::GameLog:
+            Prefix = "<GameLog> ";
             break;
         
         case ENexusChatChannel::Global: default:

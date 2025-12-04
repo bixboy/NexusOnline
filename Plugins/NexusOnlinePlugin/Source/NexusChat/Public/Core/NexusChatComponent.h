@@ -38,6 +38,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "NexusChat")
     int32 GetTeamId() const { return TeamId; }
 
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "NexusChat")
+    void BroadcastGameLog(const FString& Content, FLinearColor LogColor = FLinearColor::White);
+
     void RegisterExternalCommand(const FString& Command, FChatCommandDelegate Callback);
     void UnregisterExternalCommand(const FString& Command);
 
