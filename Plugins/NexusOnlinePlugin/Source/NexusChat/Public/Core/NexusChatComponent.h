@@ -6,78 +6,81 @@
 #include "NexusChatComponent.generated.h"
 
 
-DECLARE_DELEGATE_OneParam(FChatCommandDelegate, const FString& /*Params*/);
+class APlayerController;
 
+
+DECLARE_DELEGATE_OneParam(FChatCommandDelegate, const FString& /*Params*/);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCustomCommand, const FString&, Command, const FString&, Params);
 
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class NEXUSCHAT_API UNexusChatComponent : public UActorComponent
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public: 
-	UNexusChatComponent();
+    UNexusChatComponent();
 
-	UPROPERTY(BlueprintAssignable, Category = "NexusChat")
-	FOnMessageReceived OnMessageReceived;
+    // --- Events ---
+    UPROPERTY(BlueprintAssignable, Category = "NexusChat|Events")
+    FOnMessageReceived OnMessageReceived;
 
-	UFUNCTION(BlueprintCallable, Category = "NexusChat")
-	void SendChatMessage(const FString& Content, ENexusChatChannel Channel);
+    UPROPERTY(BlueprintAssignable, Category = "NexusChat|Events")
+    FOnCustomCommand OnCustomCommand;
 
-	UFUNCTION(BlueprintCallable, Category = "NexusChat")
-	void SetTeamId(int32 NewTeamId);
+    // --- Public API ---
+    UFUNCTION(BlueprintCallable, Category = "NexusChat")
+    void SendChatMessage(const FString& Content, ENexusChatChannel Channel);
 
-	UFUNCTION(BlueprintPure, Category = "NexusChat")
-	int32 GetTeamId() const { return TeamId; }
+    UFUNCTION(BlueprintCallable, Category = "NexusChat")
+    void SetTeamId(int32 NewTeamId);
 
-	// --- Custom Commands ---
-	
-	UPROPERTY(BlueprintAssignable, Category = "NexusChat|Events")
-	FOnCustomCommand OnCustomCommand;
+    UFUNCTION(BlueprintPure, Category = "NexusChat")
+    int32 GetTeamId() const { return TeamId; }
 
-	void RegisterExternalCommand(const FString& Command, FChatCommandDelegate Callback);
-
-	void UnregisterExternalCommand(const FString& Command);
+    void RegisterExternalCommand(const FString& Command, FChatCommandDelegate Callback);
+    void UnregisterExternalCommand(const FString& Command);
 
 protected:
-	virtual void BeginPlay() override;
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    // --- Lifecycle ---
+    virtual void BeginPlay() override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	UFUNCTION(Server, Reliable, WithValidation)
-	void Server_SendChatMessage(const FString& Content, ENexusChatChannel Channel);
+    // --- Network RPCs ---
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_SendChatMessage(const FString& Content, ENexusChatChannel Channel);
 
-	UFUNCTION(Client, Reliable)
-	void Client_ReceiveChatMessage(const FNexusChatMessage& Message);
+    UFUNCTION(Client, Reliable)
+    void Client_ReceiveChatMessage(const FNexusChatMessage& Message);
 
-	virtual void RouteMessage(const FNexusChatMessage& Msg);
+    // --- Internal Logic ---
+    virtual void RouteMessage(const FNexusChatMessage& Msg);
+    void FilterProfanity(FString& Message);
+    FString DecorateMessage(const FString& Message, ENexusChatChannel Channel) const;
 
-	void FilterProfanity(FString& Message);
-	
-	FString DecorateMessage(const FString& Message, ENexusChatChannel Channel);
+    // --- Command System ---
+    void RegisterCommands();
+    bool ProcessSlashCommand(const FString& Content);
 
-	// --- Base Commands ---
-	
-	void RegisterCommands();
-	bool ProcessSlashCommand(const FString& Content);
-    
-	void Cmd_Quit(const FString& Params);
-	void Cmd_Whisper(const FString& Params);
-	void Cmd_Team(const FString& Params);
-	void Cmd_Reply(const FString& Params);
+    // Built-in Commands
+    void Cmd_Quit(const FString& Params);
+    void Cmd_Whisper(const FString& Params);
+    void Cmd_Team(const FString& Params);
+    void Cmd_Reply(const FString& Params);
 
 private:
-	
-	UPROPERTY()
-	FDateTime LastMessageTime;
+    // --- State ---
+    UPROPERTY()
+    FDateTime LastMessageTime;
 
-	UPROPERTY()
-	FString LastWhisperSender;
+    UPROPERTY()
+    FString LastWhisperSender;
 
-	static const float SpamCooldown;
+    UPROPERTY(Replicated)
+    int32 TeamId = -1;
 
-	TMap<FString, FChatCommandDelegate> CommandHandlers;
+    TMap<FString, FChatCommandDelegate> CommandHandlers;
 
-	UPROPERTY(Replicated)
-	int32 TeamId = -1;
+    // --- Constants ---
+    static const float SpamCooldown;
 };

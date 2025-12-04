@@ -21,7 +21,8 @@ public class NexusChat : ModuleRules
                 "Slate",
                 "SlateCore",
                 "NetCore",
-                "UMG"
+                "UMG",
+                "InputCore"
             }
         );
     }

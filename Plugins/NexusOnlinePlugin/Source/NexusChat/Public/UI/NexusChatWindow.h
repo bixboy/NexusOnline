@@ -42,4 +42,18 @@ protected:
 private:
 	UPROPERTY()
 	UNexusChatComponent* ChatComponent;
+
+	// --- Auto Completion ---
+
+	virtual FReply NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+
+	UFUNCTION()
+	void HandleChatTextChanged(const FText& Text);
+
+	void HandleAutoCompletion();
+
+	TArray<FString> AutoCompleteMatches;
+	int32 CurrentMatchIndex = 0;
+	FString AutoCompletePrefix;
+	bool bIsAutoCompleting = false;
 };
