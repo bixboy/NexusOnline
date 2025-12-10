@@ -59,6 +59,9 @@ protected:
     UFUNCTION(Client, Reliable)
     void Client_ReceiveChatMessage(const FNexusChatMessage& Message);
 
+    UFUNCTION(Server, Reliable)
+    void Server_RequestChatHistory();
+
     // --- Internal Logic ---
     virtual void RouteMessage(const FNexusChatMessage& Msg);
     void FilterProfanity(FString& Message);

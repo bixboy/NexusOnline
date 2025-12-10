@@ -124,21 +124,29 @@ void UAsyncTask_CreateSession::Activate()
 	// ──────────────────────────────────────────────
 	// Metadata
 	// ──────────────────────────────────────────────
-	// Optimization: On NULL subsystem, avoid putting too much data in the Ping packet (LAN beacon) to prevent drops.
-	const EOnlineDataAdvertisementType::Type AdType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
-	
-	// For NULL, we even move the Session Type to ViaOnlineService to ensure the packet is as small as possible.
-	// This means FindSessions must be lenient with type checking on NULL.
-	const EOnlineDataAdvertisementType::Type CriticalAdType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
+    
+	// Optimisation : Pour le subsystem NULL (LAN), on n'envoie dans le Ping QUE ce qui est nécessaire au filtrage.
+	// Les infos cosmétiques (Map, Mode) ne seront récupérées qu'après le Join pour économiser la bande passante du Beacon.
+	const EOnlineDataAdvertisementType::Type CosmeticAdType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
+    
+	// CRITIQUE : Ces clés sont utilisées par les filtres (FindSessions). Elles DOIVENT être dans le Ping.
+	const EOnlineDataAdvertisementType::Type FilterableAdType = EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
 
-	Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, AdType);
-	Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, AdType);
-	Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, AdType);
-	Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), CriticalAdType);
+	// Données cosmétiques (peuvent être cachées du ping en LAN pour optimiser)
+	Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, CosmeticAdType);
+	Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, CosmeticAdType);
+	Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, CosmeticAdType);
+	Settings.Set(TEXT("HOST_PLATFORM"), UGameplayStatics::GetPlatformName(), EOnlineDataAdvertisementType::ViaOnlineService); // Pas besoin dans le ping
+
+	// Données de filtrage (OBLIGATOIRES dans le ping)
+	Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), FilterableAdType);
+	Settings.Set(FName("BUILD_VERSION"), 1, FilterableAdType);
+	Settings.Set(NexusOnline::SESSION_KEY_PROJECT_ID_INT, NexusOnline::PROJECT_ID_VALUE_INT, FilterableAdType);
+	Settings.Set(TEXT("SESSION_ID_KEY"), FString(Data.SessionId), FilterableAdType);
+    
+	// Toujours via service uniquement
 	Settings.Set(TEXT("USES_PRESENCE"), true, EOnlineDataAdvertisementType::ViaOnlineService);
-	Settings.Set(TEXT("HOST_PLATFORM"), UGameplayStatics::GetPlatformName(), EOnlineDataAdvertisementType::ViaOnlineService);
-	Settings.Set(FName("BUILD_VERSION"), 1, AdType);
-	Settings.Set(NexusOnline::SESSION_KEY_PROJECT_ID_INT, NexusOnline::PROJECT_ID_VALUE_INT, AdType);
+	
 	// ──────────────────────────────────────────────
 	// Merge user filters and preset filters
 	// ──────────────────────────────────────────────

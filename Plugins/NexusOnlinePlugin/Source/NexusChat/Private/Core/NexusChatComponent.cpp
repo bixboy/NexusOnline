@@ -25,18 +25,10 @@ void UNexusChatComponent::BeginPlay()
     Super::BeginPlay();
     RegisterCommands();
 
-    if (GetOwner()->HasAuthority())
+    // Client-side: demander l'historique au serveur une fois prêt
+    if (!GetOwner()->HasAuthority())
     {
-        if (UWorld* World = GetWorld())
-        {
-            if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
-            {
-                for (const FNexusChatMessage& Msg : ChatSubsystem->GetHistory())
-                {
-                    Client_ReceiveChatMessage(Msg);
-                }
-            }
-        }
+        Server_RequestChatHistory();
     }
 }
 
@@ -75,16 +67,9 @@ void UNexusChatComponent::BroadcastGameLog(const FString& Content, FLinearColor 
         return;
     }
 
-    FString FinalContent = Content;
-    
-    // Apply color formatting if not white
-    if (LogColor != FLinearColor::White)
-    {
-        FString HexColor = LogColor.ToFColor(true).ToHex();
-        FinalContent = FString::Printf(TEXT("<span color=\"#%s\">%s</span>"), *HexColor, *Content);
-    }
-
-    FinalContent = DecorateMessage(FinalContent, ENexusChatChannel::GameLog);
+    // Note: La couleur est ignorée car le style est défini dans le DataTable Rich Text (GameLog)
+    // Si vous voulez des couleurs personnalisées, créez des styles supplémentaires dans le DataTable
+    FString FinalContent = DecorateMessage(Content, ENexusChatChannel::GameLog);
 
     FNexusChatMessage Msg;
     Msg.SenderName = TEXT("GAME");
@@ -176,6 +161,20 @@ void UNexusChatComponent::Client_ReceiveChatMessage_Implementation(const FNexusC
     }
     
     OnMessageReceived.Broadcast(Message);
+}
+
+void UNexusChatComponent::Server_RequestChatHistory_Implementation()
+{
+    if (UWorld* World = GetWorld())
+    {
+        if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
+        {
+            for (const FNexusChatMessage& Msg : ChatSubsystem->GetHistory())
+            {
+                Client_ReceiveChatMessage(Msg);
+            }
+        }
+    }
 }
 
 void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
@@ -370,6 +369,12 @@ void UNexusChatComponent::Cmd_Reply(const FString& Params)
 void UNexusChatComponent::FilterProfanity(FString& Message)
 {
     // Basic implementation - Replace with SteamUtils or Regex later
+
+    // 1. Sanitization
+    Message = Message.Replace(TEXT("<"), TEXT("&lt;"));
+    Message = Message.Replace(TEXT(">"), TEXT("&gt;"));
+
+    // 2. Profanity
     const FString BadWord = "badword";
     if (Message.Contains(BadWord))
     {
@@ -400,7 +405,7 @@ FString UNexusChatComponent::DecorateMessage(const FString& Message, ENexusChatC
             break;
 
         case ENexusChatChannel::GameLog:
-            Prefix = "<GameLog> ";
+            Prefix = "[GameLog] ";
             break;
         
         case ENexusChatChannel::Global: default:

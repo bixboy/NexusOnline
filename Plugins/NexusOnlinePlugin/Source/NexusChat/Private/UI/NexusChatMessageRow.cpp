@@ -12,6 +12,7 @@ void UNexusChatMessageRow::NativeConstruct()
 		ChannelStyles.Add(ENexusChatChannel::Party, "Party");
 		ChannelStyles.Add(ENexusChatChannel::Whisper, "Whisper");
 		ChannelStyles.Add(ENexusChatChannel::System, "System");
+		ChannelStyles.Add(ENexusChatChannel::GameLog, "GameLog");
 	}
 }
 

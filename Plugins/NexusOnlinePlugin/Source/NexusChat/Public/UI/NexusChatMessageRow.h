@@ -12,7 +12,7 @@ class NEXUSCHAT_API UNexusChatMessageRow : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(meta = (BindWidget))
+	UPROPERTY(meta = (BindWidget), BlueprintReadWrite)
 	URichTextBlock* MessageText;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NexusChat")
