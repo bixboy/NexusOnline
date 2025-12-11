@@ -169,7 +169,7 @@ void UNexusChatComponent::Server_RequestChatHistory_Implementation()
     {
         if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
         {
-            for (const FNexusChatMessage& Msg : ChatSubsystem->GetHistory())
+            for (const FNexusChatMessage& Msg : ChatSubsystem->GetFilteredHistory())
             {
                 Client_ReceiveChatMessage(Msg);
             }

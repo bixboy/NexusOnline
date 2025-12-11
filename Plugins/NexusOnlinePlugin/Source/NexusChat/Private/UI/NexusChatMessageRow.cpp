@@ -1,10 +1,11 @@
 #include "UI/NexusChatMessageRow.h"
-
+#include "Core/NexusLinkHelpers.h"
 
 void UNexusChatMessageRow::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	// Initialize default channel styles if not set
 	if (ChannelStyles.IsEmpty())
 	{
 		ChannelStyles.Add(ENexusChatChannel::Global, "Global");
@@ -16,30 +17,68 @@ void UNexusChatMessageRow::NativeConstruct()
 	}
 }
 
+void UNexusChatMessageRow::HandlePlayerLinkClicked(const FString& PlayerName)
+{
+	OnPlayerClicked.Broadcast(PlayerName);
+}
+
 void UNexusChatMessageRow::InitWidget_Implementation(const FNexusChatMessage& Message)
 {
 	if (!MessageText)
-		return;
-
-	FName StyleName = "Default";
-	if (ChannelStyles.Contains(Message.Channel))
 	{
-		StyleName = ChannelStyles[Message.Channel];
+		return;
 	}
 
+	// Get style for this channel
+	FName StyleName = ChannelStyles.Contains(Message.Channel) 
+		? ChannelStyles[Message.Channel] 
+		: FName("Default");
+
+	// Decode HTML entities (may be escaped during network transfer)
+	FString Content = Message.MessageContent;
+	Content = Content.Replace(TEXT("&lt;"), TEXT("<"));
+	Content = Content.Replace(TEXT("&gt;"), TEXT(">"));
+	Content = Content.Replace(TEXT("&amp;"), TEXT("&"));
+	Content = Content.Replace(TEXT("&quot;"), TEXT("\""));
+
+	// Auto-format URLs first (converts URLs to <link> tags)
+	FString FormattedContent = UNexusLinkHelpers::AutoFormatUrls(Content);
+	
+	// Check if content has links AFTER formatting
+	const bool bHasLinks = FormattedContent.Contains(TEXT("<link"));
+	const bool bIsSystemMessage = (Message.Channel == ENexusChatChannel::System || 
+	                               Message.Channel == ENexusChatChannel::GameLog);
+
+	// Build the final text
 	FString FullText;
-	if (Message.Channel == ENexusChatChannel::System)
+	
+	if (bIsSystemMessage)
 	{
-		FullText = FString::Printf(TEXT("<%s>%s</>"), *StyleName.ToString(), *Message.MessageContent);
+		// System messages: no player name
+		if (bHasLinks)
+		{
+			FullText = FormattedContent;
+		}
+		else
+		{
+			FullText = FString::Printf(TEXT("<%s>%s</>"), *StyleName.ToString(), *FormattedContent);
+		}
 	}
 	else
 	{
-		FString SenderName = Message.SenderName;
-		if (SenderName.Len() > 10)
+		// Player messages: clickable name + content
+		FString PlayerLink = UNexusLinkHelpers::MakePlayerLink(Message.SenderName, 15);
+		
+		if (bHasLinks)
 		{
-			SenderName = SenderName.Left(10) + "...";
+			// Has links - don't wrap in style tag (would break link parsing)
+			FullText = FString::Printf(TEXT("%s: %s"), *PlayerLink, *FormattedContent);
 		}
-		FullText = FString::Printf(TEXT("<%s>%s: %s</>"), *StyleName.ToString(), *SenderName, *Message.MessageContent);
+		else
+		{
+			// No links - safe to wrap in style tag
+			FullText = FString::Printf(TEXT("%s: <%s>%s</>"), *PlayerLink, *StyleName.ToString(), *FormattedContent);
+		}
 	}
 
 	MessageText->SetText(FText::FromString(FullText));

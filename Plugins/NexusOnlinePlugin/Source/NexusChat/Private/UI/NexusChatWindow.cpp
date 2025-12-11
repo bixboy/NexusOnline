@@ -1,12 +1,18 @@
 #include "UI/NexusChatWindow.h"
+#include "Core/NexusChatSubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
+
+// ════════════════════════════════════════════════════════════════════════════════
+// LIFECYCLE
+// ════════════════════════════════════════════════════════════════════════════════
 
 void UNexusChatWindow::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	// Bind to chat component
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		ChatComponent = PC->FindComponentByClass<UNexusChatComponent>();
@@ -14,7 +20,7 @@ void UNexusChatWindow::NativeConstruct()
 		{
 			ChatComponent->OnMessageReceived.AddDynamic(this, &UNexusChatWindow::HandleMessageReceived);
 			
-			// Populate history
+			// Populate existing history
 			for (const FNexusChatMessage& Msg : ChatComponent->GetClientChatHistory())
 			{
 				HandleMessageReceived(Msg);
@@ -22,12 +28,43 @@ void UNexusChatWindow::NativeConstruct()
 		}
 	}
 
+	// Bind input events
 	if (ChatInput)
 	{
 		ChatInput->OnTextCommitted.AddDynamic(this, &UNexusChatWindow::HandleTextCommitted);
 		ChatInput->OnTextChanged.AddDynamic(this, &UNexusChatWindow::HandleChatTextChanged);
 	}
+
+	// Bind to subsystem for link events
+	if (UWorld* World = GetWorld())
+	{
+		if (UNexusChatSubsystem* Subsystem = World->GetSubsystem<UNexusChatSubsystem>())
+		{
+			Subsystem->OnPlayerLinkClicked.AddDynamic(this, &UNexusChatWindow::HandlePlayerLinkClicked);
+			Subsystem->OnUrlLinkClicked.AddDynamic(this, &UNexusChatWindow::HandleUrlLinkClicked);
+			Subsystem->OnAnyLinkClicked.AddDynamic(this, &UNexusChatWindow::HandleAnyLinkClicked);
+		}
+	}
 }
+
+void UNexusChatWindow::NativeDestruct()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UNexusChatSubsystem* Subsystem = World->GetSubsystem<UNexusChatSubsystem>())
+		{
+			Subsystem->OnPlayerLinkClicked.RemoveDynamic(this, &UNexusChatWindow::HandlePlayerLinkClicked);
+			Subsystem->OnUrlLinkClicked.RemoveDynamic(this, &UNexusChatWindow::HandleUrlLinkClicked);
+			Subsystem->OnAnyLinkClicked.RemoveDynamic(this, &UNexusChatWindow::HandleAnyLinkClicked);
+		}
+	}
+
+	Super::NativeDestruct();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MESSAGE HANDLING
+// ════════════════════════════════════════════════════════════════════════════════
 
 void UNexusChatWindow::HandleMessageReceived(const FNexusChatMessage& Msg)
 {
@@ -42,6 +79,7 @@ void UNexusChatWindow::HandleMessageReceived(const FNexusChatMessage& Msg)
 		ChatScrollBox->AddChild(NewRow);
 		ChatScrollBox->ScrollToEnd();
 
+		// Limit message count
 		if (ChatScrollBox->GetChildrenCount() > MaxChatLines)
 		{
 			ChatScrollBox->RemoveChildAt(0);
@@ -51,53 +89,69 @@ void UNexusChatWindow::HandleMessageReceived(const FNexusChatMessage& Msg)
 
 void UNexusChatWindow::HandleTextCommitted(const FText& Text, ETextCommit::Type CommitMethod)
 {
-	if (CommitMethod == ETextCommit::OnEnter)
+	if (CommitMethod != ETextCommit::OnEnter || !ChatComponent || Text.IsEmpty())
 	{
-		if (ChatComponent && !Text.IsEmpty())
-		{
-			ChatComponent->SendChatMessage(Text.ToString(), ENexusChatChannel::Global);
-			
-			if (ChatInput)
-			{
-				ChatInput->SetText(FText::GetEmpty());
-			}
-		}
+		return;
+	}
+
+	// Format and send message
+	ENexusChatChannel Channel = ENexusChatChannel::Global;
+	FString FormattedMessage = FormatOutgoingMessage(Text.ToString(), Channel);
+	ChatComponent->SendChatMessage(FormattedMessage, Channel);
+
+	if (ChatInput)
+	{
+		ChatInput->SetText(FText::GetEmpty());
 	}
 }
 
+FString UNexusChatWindow::FormatOutgoingMessage_Implementation(const FString& RawMessage, ENexusChatChannel Channel)
+{
+	// Override in Blueprint to add custom formatting (links, emotes, etc.)
+	return RawMessage;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// INPUT & FOCUS
+// ════════════════════════════════════════════════════════════════════════════════
+
 void UNexusChatWindow::ToggleChatFocus(bool bFocus)
 {
-	if (APlayerController* PC = GetOwningPlayer())
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
 	{
-		if (bFocus)
-		{
-			FInputModeUIOnly InputMode;
-			InputMode.SetWidgetToFocus(ChatInput ? ChatInput->TakeWidget() : TakeWidget());
-			PC->SetInputMode(InputMode);
-			PC->SetShowMouseCursor(true);
-		}
-		else
-		{
-			FInputModeGameOnly InputMode;
-			PC->SetInputMode(InputMode);
-			PC->SetShowMouseCursor(false);
-		}
+		return;
+	}
+
+	if (bFocus)
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(ChatInput ? ChatInput->TakeWidget() : TakeWidget());
+		PC->SetInputMode(InputMode);
+		PC->SetShowMouseCursor(true);
+	}
+	else
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->SetShowMouseCursor(false);
 	}
 }
 
 FReply UNexusChatWindow::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (ChatInput && ChatInput->HasKeyboardFocus())
+	// Tab for auto-completion
+	if (ChatInput && ChatInput->HasKeyboardFocus() && InKeyEvent.GetKey() == EKeys::Tab)
 	{
-		if (InKeyEvent.GetKey() == EKeys::Tab)
-		{
-			HandleAutoCompletion();
-			return FReply::Handled();
-		}
+		HandleAutoCompletion();
+		return FReply::Handled();
 	}
 
 	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// AUTO-COMPLETION
+// ════════════════════════════════════════════════════════════════════════════════
 
 void UNexusChatWindow::HandleChatTextChanged(const FText& Text)
 {
@@ -126,21 +180,8 @@ void UNexusChatWindow::HandleAutoCompletion()
 		return;
 	}
 
-	// Find the word being typed (last word)
-	int32 CursorPos = CurrentText.Len(); // Ideally we'd get the cursor position, but for now assuming end of text
-	// Note: UEditableTextBox doesn't expose cursor position easily in C++ without accessing the slate widget.
-	// For simplicity, we'll assume we are auto-completing the last word if the cursor is at the end.
-	
-	int32 LastSpaceIndex = -1;
-	for (int32 i = CurrentText.Len() - 1; i >= 0; --i)
-	{
-		if (FChar::IsWhitespace(CurrentText[i]))
-		{
-			LastSpaceIndex = i;
-			break;
-		}
-	}
-
+	// Find last word being typed
+	int32 LastSpaceIndex = CurrentText.FindLastCharByPredicate([](TCHAR C) { return FChar::IsWhitespace(C); });
 	FString WordPrefix = CurrentText.RightChop(LastSpaceIndex + 1);
 	
 	if (WordPrefix.IsEmpty())
@@ -148,10 +189,7 @@ void UNexusChatWindow::HandleAutoCompletion()
 		return;
 	}
 
-	// If we are starting a new completion or the prefix changed significantly (user typed more)
-	// Actually, the logic "if (!bIsAutoCompleting)" in TextChanged handles the reset.
-	// So here we just check if we need to fetch matches.
-	
+	// Build match list if needed
 	if (AutoCompleteMatches.Num() == 0)
 	{
 		AutoCompletePrefix = WordPrefix;
@@ -164,10 +202,10 @@ void UNexusChatWindow::HandleAutoCompletion()
 				{
 					if (PS)
 					{
-						FString PlayerName = PS->GetPlayerName();
-						if (PlayerName.StartsWith(AutoCompletePrefix, ESearchCase::IgnoreCase))
+						FString Name = PS->GetPlayerName();
+						if (Name.StartsWith(AutoCompletePrefix, ESearchCase::IgnoreCase))
 						{
-							AutoCompleteMatches.Add(PlayerName);
+							AutoCompleteMatches.Add(Name);
 						}
 					}
 				}
@@ -178,23 +216,33 @@ void UNexusChatWindow::HandleAutoCompletion()
 		CurrentMatchIndex = 0;
 	}
 
+	// Apply match
 	if (AutoCompleteMatches.Num() > 0)
 	{
-		// Cycle matches
-		if (CurrentMatchIndex >= AutoCompleteMatches.Num())
-		{
-			CurrentMatchIndex = 0;
-		}
-
-		FString MatchedName = AutoCompleteMatches[CurrentMatchIndex];
+		CurrentMatchIndex = CurrentMatchIndex % AutoCompleteMatches.Num();
+		FString NewText = CurrentText.Left(LastSpaceIndex + 1) + AutoCompleteMatches[CurrentMatchIndex];
 		
-		// Replace the last word with the matched name
-		FString NewText = CurrentText.Left(LastSpaceIndex + 1) + MatchedName;
-		
-		bIsAutoCompleting = true; // Set flag to ignore the next TextChanged event
+		bIsAutoCompleting = true;
 		ChatInput->SetText(FText::FromString(NewText));
-		
-		// Move index for next tab press
 		CurrentMatchIndex++;
 	}
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// LINK EVENT RELAYS
+// ════════════════════════════════════════════════════════════════════════════════
+
+void UNexusChatWindow::HandlePlayerLinkClicked(const FString& LinkType, const FString& LinkData)
+{
+	OnPlayerClicked.Broadcast(LinkType, LinkData);
+}
+
+void UNexusChatWindow::HandleUrlLinkClicked(const FString& LinkType, const FString& LinkData)
+{
+	OnUrlClicked.Broadcast(LinkType, LinkData);
+}
+
+void UNexusChatWindow::HandleAnyLinkClicked(const FString& LinkType, const FString& LinkData)
+{
+	OnAnyLinkClicked.Broadcast(LinkType, LinkData);
 }
