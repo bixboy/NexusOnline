@@ -26,27 +26,37 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	// ────────────────────────────────────────────
-	// HISTORY
-	// ────────────────────────────────────────────
+	// ──────────────────────────────────────────────
+	// HISTORY MANAGEMENT
+	// ──────────────────────────────────────────────
 
+	UFUNCTION(BlueprintCallable, Category = "NexusChat")
 	void AddMessage(const FNexusChatMessage& Msg);
 
-	const TArray<FNexusChatMessage>& GetHistory() const { return GlobalChatHistory; }
+	UFUNCTION(BlueprintCallable, Category = "NexusChat")
+	void AddHistoryFilter(FName ChannelName);
 
-	// --- History Filters ---
-	UFUNCTION(BlueprintCallable, Category = "NexusChat|History")
-	void AddHistoryFilter(ENexusChatChannel Channel);
+	UFUNCTION(BlueprintCallable, Category = "NexusChat")
+	void RemoveHistoryFilter(FName ChannelName);
 
-	UFUNCTION(BlueprintCallable, Category = "NexusChat|History")
-	void RemoveHistoryFilter(ENexusChatChannel Channel);
-
-	UFUNCTION(BlueprintCallable, Category = "NexusChat|History")
+	UFUNCTION(BlueprintCallable, Category = "NexusChat")
 	void ClearHistoryFilters();
 
-	UFUNCTION(BlueprintPure, Category = "NexusChat|History")
-	bool IsChannelFiltered(ENexusChatChannel Channel) const;
+	/** 
+	 * Switch between Blacklist (Exclude filtered) and Whitelist (Include Only filtered) modes. 
+	 * Default is Blacklist (bWhitelistMode = false).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NexusChat")
+	void SetWhitelistMode(bool bEnable);
 
+	UFUNCTION(BlueprintPure, Category = "NexusChat")
+	bool IsChannelFiltered(FName ChannelName) const;
+
+	/** Checks if a message should be displayed based on current filters (Whitelist/Blacklist) */
+	UFUNCTION(BlueprintPure, Category = "NexusChat")
+	bool IsMessagePassesFilter(const FNexusChatMessage& Msg) const;
+
+	UFUNCTION(BlueprintPure, Category = "NexusChat")
 	TArray<FNexusChatMessage> GetFilteredHistory() const;
 
 	// ────────────────────────────────────────────
@@ -101,8 +111,11 @@ private:
 	UPROPERTY()
 	TArray<FNexusChatMessage> GlobalChatHistory;
 
+	/** Channels to either exclude or include solely based on bWhitelistMode */
 	UPROPERTY()
-	TSet<ENexusChatChannel> FilteredChannels;
+	TSet<FName> FilteredChannels;
+
+	bool bWhitelistMode = false;
 
 	int32 MaxHistorySize = 50;
 

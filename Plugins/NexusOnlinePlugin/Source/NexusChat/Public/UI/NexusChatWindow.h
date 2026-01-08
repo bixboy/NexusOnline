@@ -1,5 +1,4 @@
 #pragma once
-
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Types/NexusChatTypes.h"
@@ -9,6 +8,10 @@
 #include "Components/EditableTextBox.h"
 #include "UI/NexusChatMessageRow.h"
 #include "NexusChatWindow.generated.h"
+
+
+class UNexusChatTabButton;
+
 
 UCLASS()
 class NEXUSCHAT_API UNexusChatWindow : public UUserWidget
@@ -28,36 +31,49 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "NexusChat")
 	int32 MaxChatLines = 100;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NexusChat")
+	bool bEnableChatTabs = true;
+
+	UPROPERTY(meta = (BindWidgetOptional), BlueprintReadOnly)
+	class UHorizontalBox* TabContainer;
+
+	UPROPERTY(meta = (BindWidgetOptional), BlueprintReadOnly)
+	class UButton* AddChannelButton;
+
 	// ────────────────────────────────────────────
-	// LINK CLICK EVENTS (bind these in Blueprint!)
+	// TAB SYSTEM
 	// ────────────────────────────────────────────
 
-	/** Called when a player name link is clicked. LinkData = PlayerName */
+	/** List of channels to cycle through when adding a new tab via the UI */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NexusChat")
+	TArray<FName> AvailableChannels;
+
+	UFUNCTION(BlueprintCallable, Category = "NexusChat")
+	void SelectTab(FName ChannelName, bool bIsGeneral);
+
+	UFUNCTION()
+	void OnAddChannelClicked();
+
+	UFUNCTION()
+	void OnTabClicked(FName ChannelName, bool bIsGeneral);
+
+	// ────────────────────────────────────────────
+	// LINK CLICK EVENTS
+	// ────────────────────────────────────────────
+
 	UPROPERTY(BlueprintAssignable, Category = "NexusChat|Links")
 	FOnChatLinkClicked OnPlayerClicked;
 
-	/** Called when a URL link is clicked. LinkData = URL */
 	UPROPERTY(BlueprintAssignable, Category = "NexusChat|Links")
 	FOnChatLinkClicked OnUrlClicked;
 
-	/** Called when ANY link is clicked. Useful for custom link types. */
 	UPROPERTY(BlueprintAssignable, Category = "NexusChat|Links")
 	FOnChatLinkClicked OnAnyLinkClicked;
 
 	// ────────────────────────────────────────────
 	// MESSAGE FORMATTING
 	// ────────────────────────────────────────────
-
-	/**
-	 * Called before a message is sent. Override in Blueprint to format the message.
-	 * Use this to add custom links, auto-replace text, etc.
-	 * 
-	 * Example: return UNexusLinkHelpers::AutoFormatUrls(RawMessage);
-	 * 
-	 * @param RawMessage The original message typed by the user
-	 * @param Channel The channel the message will be sent to
-	 * @return The formatted message (will be sent instead of RawMessage)
-	 */
+	
 	UFUNCTION(BlueprintNativeEvent, Category = "NexusChat")
 	FString FormatOutgoingMessage(const FString& RawMessage, ENexusChatChannel Channel);
 	virtual FString FormatOutgoingMessage_Implementation(const FString& RawMessage, ENexusChatChannel Channel);
@@ -75,7 +91,6 @@ protected:
 	UFUNCTION()
 	void HandleTextCommitted(const FText& Text, ETextCommit::Type CommitMethod);
 
-	// Link event handlers (bound to subsystem)
 	UFUNCTION()
 	void HandlePlayerLinkClicked(const FString& LinkType, const FString& LinkData);
 
@@ -88,9 +103,7 @@ protected:
 private:
 	UPROPERTY()
 	UNexusChatComponent* ChatComponent;
-
-	// --- Auto Completion ---
-
+	
 	virtual FReply NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 	UFUNCTION()
@@ -102,4 +115,18 @@ private:
 	int32 CurrentMatchIndex = 0;
 	FString AutoCompletePrefix;
 	bool bIsAutoCompleting = false;
+
+	bool bIsGeneralTabActive = true;
+	FName ActiveChannelName = NAME_None;
+
+	/** We need to keep references to the dynamically created tab buttons to style them selected/unselected */
+	UPROPERTY()
+	TMap<FName, UButton*> ChannelTabButtons;
+	
+	UPROPERTY()
+	UButton* GeneralTabButton = nullptr;
+
+	void UpdateTabStyles();
+	
+	UNexusChatTabButton* CreateTabButton(const FText& Label, FName ChannelName, bool bIsGeneral);
 };

@@ -30,6 +30,10 @@ struct NEXUSCHAT_API FNexusChatMessage
 
 	UPROPERTY(BlueprintReadOnly, Category = "Chat")
 	ENexusChatChannel Channel;
+	
+	/** Custom channel name (e.g. "Trade", "Guild"). If empty, uses the Enum display name. */
+	UPROPERTY(BlueprintReadOnly, Category = "Chat")
+	FName ChannelName;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Chat")
 	int32 SenderTeamId;
@@ -49,6 +53,7 @@ struct NEXUSCHAT_API FNexusChatMessage
 		Ar << MessageContent;
 		Ar << Timestamp;
 		Ar << Channel;
+		Ar << ChannelName;
 		
 		if (Channel == ENexusChatChannel::Team)
 		{

@@ -32,6 +32,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "NexusChat")
     void SendChatMessage(const FString& Content, ENexusChatChannel Channel);
 
+    /** Send a message to a specific custom channel (or standard one with overridden name) */
+    UFUNCTION(BlueprintCallable, Category = "NexusChat")
+    void SendChatMessageCustom(const FString& Content, FName ChannelName, ENexusChatChannel Routing = ENexusChatChannel::Global);
+
     UFUNCTION(BlueprintCallable, Category = "NexusChat")
     void SetTeamId(int32 NewTeamId);
 
@@ -52,12 +56,15 @@ protected:
     virtual void BeginPlay() override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-    // --- Network RPCs ---
-    UFUNCTION(Server, Reliable, WithValidation)
-    void Server_SendChatMessage(const FString& Content, ENexusChatChannel Channel);
+    	// --- Network RPCs ---
+	UFUNCTION(Server, Reliable, WithValidation)
+	void Server_SendChatMessage(const FString& Content, ENexusChatChannel Channel, FName ChannelName = NAME_None);
+
+	UFUNCTION(Client, Reliable)
+	void Client_ReceiveChatMessage(const FNexusChatMessage& Message);
 
     UFUNCTION(Client, Reliable)
-    void Client_ReceiveChatMessage(const FNexusChatMessage& Message);
+    void Client_ReceiveChatMessages(const TArray<FNexusChatMessage>& Messages);
 
     UFUNCTION(Server, Reliable)
     void Server_RequestChatHistory();

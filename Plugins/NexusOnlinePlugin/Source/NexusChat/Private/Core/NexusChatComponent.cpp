@@ -25,7 +25,6 @@ void UNexusChatComponent::BeginPlay()
     Super::BeginPlay();
     RegisterCommands();
 
-    // Client-side: demander l'historique au serveur une fois prêt
     if (!GetOwner()->HasAuthority())
     {
         Server_RequestChatHistory();
@@ -44,10 +43,15 @@ void UNexusChatComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 
 void UNexusChatComponent::SendChatMessage(const FString& Content, ENexusChatChannel Channel)
 {
-    if (Content.IsEmpty())
-        return;
-    
-    Server_SendChatMessage(Content, Channel);
+	SendChatMessageCustom(Content, NAME_None, Channel);
+}
+
+void UNexusChatComponent::SendChatMessageCustom(const FString& Content, FName ChannelName, ENexusChatChannel Routing)
+{
+	if (Content.IsEmpty())
+		return;
+	
+	Server_SendChatMessage(Content, Routing, ChannelName);
 }
 
 void UNexusChatComponent::SetTeamId(int32 NewTeamId)
@@ -58,17 +62,11 @@ void UNexusChatComponent::SetTeamId(int32 NewTeamId)
 void UNexusChatComponent::BroadcastGameLog(const FString& Content, FLinearColor LogColor)
 {
     if (!GetOwner()->HasAuthority())
-    {
         return;
-    }
 
     if (Content.IsEmpty())
-    {
         return;
-    }
-
-    // Note: La couleur est ignorée car le style est défini dans le DataTable Rich Text (GameLog)
-    // Si vous voulez des couleurs personnalisées, créez des styles supplémentaires dans le DataTable
+    
     FString FinalContent = DecorateMessage(Content, ENexusChatChannel::GameLog);
 
     FNexusChatMessage Msg;
@@ -105,46 +103,50 @@ void UNexusChatComponent::UnregisterExternalCommand(const FString& Command)
 // NETWORK & LOGIC
 // ──────────────────────────────────────────────
 
-bool UNexusChatComponent::Server_SendChatMessage_Validate(const FString& Content, ENexusChatChannel Channel)
+bool UNexusChatComponent::Server_SendChatMessage_Validate(const FString& Content, ENexusChatChannel Channel, FName ChannelName)
 {
-    return Content.Len() <= 512;
+	return Content.Len() <= 512;
 }
 
-void UNexusChatComponent::Server_SendChatMessage_Implementation(const FString& Content, ENexusChatChannel Channel)
+void UNexusChatComponent::Server_SendChatMessage_Implementation(const FString& Content, ENexusChatChannel Channel, FName ChannelName)
 {
-    const FDateTime CurrentTime = FDateTime::UtcNow();
+	const FDateTime CurrentTime = FDateTime::UtcNow();
 
-    // Anti-Spam Check
-    if ((CurrentTime - LastMessageTime).GetTotalSeconds() < SpamCooldown)
-        return;
-    
-    LastMessageTime = CurrentTime;
+	if ((CurrentTime - LastMessageTime).GetTotalSeconds() < SpamCooldown)
+		return;
+	
+	LastMessageTime = CurrentTime;
 
-    // Command Processing
-    if (ProcessSlashCommand(Content))
-        return;
+	if (ProcessSlashCommand(Content))
+		return;
 
-    // Message Processing
-    FString FinalContent = Content;
-    FilterProfanity(FinalContent);
-    FinalContent = DecorateMessage(FinalContent, Channel);
+	FString FinalContent = Content;
+	FilterProfanity(FinalContent);
+	
+	FName EffectiveChannelName = ChannelName;
+	if (EffectiveChannelName.IsNone())
+	{
+		EffectiveChannelName = FName(*UEnum::GetDisplayValueAsText(Channel).ToString());
+	}
 
-    // Construct Message
-    FNexusChatMessage Msg;
-    Msg.MessageContent = FinalContent;
-    Msg.Channel = Channel;
-    Msg.Timestamp = CurrentTime;
-    
-    if (const APlayerController* PC = Cast<APlayerController>(GetOwner()))
-    {
-        if (PC->PlayerState)
-        {
-            Msg.SenderName = PC->PlayerState->GetPlayerName();
-            Msg.SenderTeamId = TeamId;
-        }
-    }
+	FinalContent = DecorateMessage(FinalContent, Channel); 
 
-    RouteMessage(Msg);
+	FNexusChatMessage Msg;
+	Msg.MessageContent = FinalContent;
+	Msg.Channel = Channel;
+	Msg.ChannelName = EffectiveChannelName;
+	Msg.Timestamp = CurrentTime;
+	
+	if (const APlayerController* PC = Cast<APlayerController>(GetOwner()))
+	{
+		if (PC->PlayerState)
+		{
+			Msg.SenderName = PC->PlayerState->GetPlayerName();
+			Msg.SenderTeamId = TeamId;
+		}
+	}
+
+	RouteMessage(Msg);
 }
 
 void UNexusChatComponent::Client_ReceiveChatMessage_Implementation(const FNexusChatMessage& Message)
@@ -163,19 +165,36 @@ void UNexusChatComponent::Client_ReceiveChatMessage_Implementation(const FNexusC
     OnMessageReceived.Broadcast(Message);
 }
 
+void UNexusChatComponent::Client_ReceiveChatMessages_Implementation(const TArray<FNexusChatMessage>& Messages)
+{
+    for (const FNexusChatMessage& Message : Messages)
+    {
+        if (Message.Channel == ENexusChatChannel::Whisper)
+        {
+            LastWhisperSender = Message.SenderName;
+        }
+    
+        ClientChatHistory.Add(Message);
+        if (ClientChatHistory.Num() > 100)
+        {
+            ClientChatHistory.RemoveAt(0);
+        }
+    
+        OnMessageReceived.Broadcast(Message);   
+    }
+}
+
 void UNexusChatComponent::Server_RequestChatHistory_Implementation()
 {
     if (UWorld* World = GetWorld())
     {
         if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
         {
-            for (const FNexusChatMessage& Msg : ChatSubsystem->GetFilteredHistory())
-            {
-                Client_ReceiveChatMessage(Msg);
-            }
+            Client_ReceiveChatMessages(ChatSubsystem->GetFilteredHistory());
         }
     }
 }
+
 
 void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
 {
@@ -196,7 +215,6 @@ void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
         if (!PC)
             continue;
 
-        // We use FindComponentByClass instead of GetComponentByClass for safety/speed
         if (UNexusChatComponent* ChatComp = PC->FindComponentByClass<UNexusChatComponent>())
         {
             bool bShouldSend = false;
@@ -210,7 +228,6 @@ void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
                     break;
                 
                 case ENexusChatChannel::Team:
-                    // Send only if receiver has same TeamID
                     if (ChatComp->GetTeamId() == Msg.SenderTeamId)
                     {
                         bShouldSend = true;
@@ -218,11 +235,10 @@ void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
                     break;
                 
                 case ENexusChatChannel::Party:
-                    bShouldSend = true; // Placeholder logic
+                    bShouldSend = true;
                     break;
                 
                 case ENexusChatChannel::Whisper:
-                    // Send to Target AND Sender
                     if (PS->GetPlayerName() == Msg.TargetName || PS->GetPlayerName() == Msg.SenderName)
                     {
                         bShouldSend = true;
@@ -237,7 +253,6 @@ void UNexusChatComponent::RouteMessage(const FNexusChatMessage& Msg)
         }
     }
 
-    // Store in History (Server Only)
     if (Msg.Channel == ENexusChatChannel::Global || Msg.Channel == ENexusChatChannel::GameLog)
     {
         if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
@@ -272,14 +287,12 @@ bool UNexusChatComponent::ProcessSlashCommand(const FString& Content)
         Command = Content;
     }
     
-    // 1. Try C++ Handlers
     if (const FChatCommandDelegate* Handler = CommandHandlers.Find(Command))
     {
         Handler->ExecuteIfBound(Params);
         return true;
     }
     
-    // 2. Try Blueprint Handlers
     if (OnCustomCommand.IsBound())
     {
         OnCustomCommand.Broadcast(Command, Params);
@@ -357,7 +370,6 @@ void UNexusChatComponent::Cmd_Reply(const FString& Params)
         return;
     }
 
-    // Reconstruct a whisper command
     const FString FullParams = FString::Printf(TEXT("%s %s"), *LastWhisperSender, *Params);
     Cmd_Whisper(FullParams);
 }
@@ -368,8 +380,6 @@ void UNexusChatComponent::Cmd_Reply(const FString& Params)
 
 void UNexusChatComponent::FilterProfanity(FString& Message)
 {
-    // Basic implementation - Replace with SteamUtils or Regex later
-
     // 1. Sanitization
     Message = Message.Replace(TEXT("<"), TEXT("&lt;"));
     Message = Message.Replace(TEXT(">"), TEXT("&gt;"));

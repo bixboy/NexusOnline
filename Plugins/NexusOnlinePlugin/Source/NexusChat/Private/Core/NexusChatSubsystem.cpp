@@ -29,14 +29,14 @@ void UNexusChatSubsystem::AddMessage(const FNexusChatMessage& Msg)
 	}
 }
 
-void UNexusChatSubsystem::AddHistoryFilter(ENexusChatChannel Channel)
+void UNexusChatSubsystem::AddHistoryFilter(FName ChannelName)
 {
-	FilteredChannels.Add(Channel);
+	FilteredChannels.Add(ChannelName);
 }
 
-void UNexusChatSubsystem::RemoveHistoryFilter(ENexusChatChannel Channel)
+void UNexusChatSubsystem::RemoveHistoryFilter(FName ChannelName)
 {
-	FilteredChannels.Remove(Channel);
+	FilteredChannels.Remove(ChannelName);
 }
 
 void UNexusChatSubsystem::ClearHistoryFilters()
@@ -44,9 +44,35 @@ void UNexusChatSubsystem::ClearHistoryFilters()
 	FilteredChannels.Empty();
 }
 
-bool UNexusChatSubsystem::IsChannelFiltered(ENexusChatChannel Channel) const
+void UNexusChatSubsystem::SetWhitelistMode(bool bEnable)
 {
-	return FilteredChannels.Contains(Channel);
+	bWhitelistMode = bEnable;
+}
+
+bool UNexusChatSubsystem::IsChannelFiltered(FName ChannelName) const
+{
+	return FilteredChannels.Contains(ChannelName);
+}
+
+bool UNexusChatSubsystem::IsMessagePassesFilter(const FNexusChatMessage& Msg) const
+{
+	// Determine effective channel name
+	FName EffectiveChannelName = Msg.ChannelName;
+	if (EffectiveChannelName.IsNone())
+	{
+		EffectiveChannelName = FName(*UEnum::GetDisplayValueAsText(Msg.Channel).ToString());
+	}
+
+	if (bWhitelistMode)
+	{
+		// Whitelist Mode: Pass only if in set
+		return FilteredChannels.Contains(EffectiveChannelName);
+	}
+	else
+	{
+		// Blacklist Mode: Pass only if NOT in set
+		return !FilteredChannels.Contains(EffectiveChannelName);
+	}
 }
 
 TArray<FNexusChatMessage> UNexusChatSubsystem::GetFilteredHistory() const
@@ -56,7 +82,7 @@ TArray<FNexusChatMessage> UNexusChatSubsystem::GetFilteredHistory() const
 	
 	for (const FNexusChatMessage& Msg : GlobalChatHistory)
 	{
-		if (!FilteredChannels.Contains(Msg.Channel))
+		if (IsMessagePassesFilter(Msg))
 		{
 			Result.Add(Msg);
 		}
