@@ -11,7 +11,8 @@ enum class ENexusChatChannel : uint8
 	Party		UMETA(DisplayName = "Party"),
 	Whisper		UMETA(DisplayName = "Whisper"),
 	System		UMETA(DisplayName = "System"),
-	GameLog		UMETA(DisplayName = "GameLog")
+	GameLog		UMETA(DisplayName = "GameLog"),
+	Custom      UMETA(DisplayName = "Custom")
 };
 
 USTRUCT(BlueprintType)
@@ -31,7 +32,6 @@ struct NEXUSCHAT_API FNexusChatMessage
 	UPROPERTY(BlueprintReadOnly, Category = "Chat")
 	ENexusChatChannel Channel;
 	
-	/** Custom channel name (e.g. "Trade", "Guild"). If empty, uses the Enum display name. */
 	UPROPERTY(BlueprintReadOnly, Category = "Chat")
 	FName ChannelName;
 
@@ -39,31 +39,47 @@ struct NEXUSCHAT_API FNexusChatMessage
 	int32 SenderTeamId;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Chat")
+	int32 SenderPartyId;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Chat")
 	FString TargetName;
 
 	FNexusChatMessage()
 		: Timestamp(0)
 		, Channel(ENexusChatChannel::Global)
+		, ChannelName(NAME_None)
 		, SenderTeamId(-1)
+		, SenderPartyId(-1)
 	{}
+	
+	static FNexusChatMessage MakeSystem(const FString& Content)
+	{
+		FNexusChatMessage Msg;
+		Msg.Channel = ENexusChatChannel::System;
+		Msg.MessageContent = Content;
+		Msg.SenderName = TEXT("System");
+		Msg.Timestamp = FDateTime::Now();
+		return Msg;
+	}
 
 	bool NetSerialize(FArchive& Ar, UPackageMap* Map, bool& bOutSuccess)
 	{
 		Ar << SenderName;
 		Ar << MessageContent;
 		Ar << Timestamp;
-		Ar << Channel;
-		Ar << ChannelName;
 		
-		if (Channel == ENexusChatChannel::Team)
+		uint8 Ch = static_cast<uint8>(Channel);
+		Ar << Ch;
+		if (Ar.IsLoading())
 		{
-			Ar << SenderTeamId;
+			Channel = static_cast<ENexusChatChannel>(Ch);
 		}
+		
+		Ar << ChannelName;
 
-		if (Channel == ENexusChatChannel::Whisper)
-		{
-			Ar << TargetName;
-		}
+		Ar << SenderTeamId;
+		Ar << SenderPartyId;
+		Ar << TargetName;
 
 		bOutSuccess = true;
 		return true;
@@ -71,7 +87,7 @@ struct NEXUSCHAT_API FNexusChatMessage
 };
 
 template<>
-struct TStructOpsTypeTraits<FNexusChatMessage> : public TStructOpsTypeTraitsBase2<FNexusChatMessage>
+struct TStructOpsTypeTraits<FNexusChatMessage> : TStructOpsTypeTraitsBase2<FNexusChatMessage>
 {
 	enum
 	{

@@ -58,6 +58,14 @@ public:
 	/** Type de session (Game, Party, etc.) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
 	ENexusSessionType SessionType = ENexusSessionType::GameSession;
+	
+	/** Enable Host Migration? */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
+	bool bAllowHostMigration = false;
+	
+	/** Unique ID for migration tracking. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
+	FString MigrationSessionID;
 
 	/** Optional custom session ID (generated automatically if empty). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Session")
@@ -95,6 +103,9 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category="Nexus|Online|Session")
 	int32 MaxPlayers = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Nexus|Online|Session")
+	int32 Ping = 0;
 
 	FOnlineSessionSearchResult RawResult;
 };

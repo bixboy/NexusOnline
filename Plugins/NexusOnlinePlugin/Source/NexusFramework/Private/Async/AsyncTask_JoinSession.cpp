@@ -1,5 +1,6 @@
 ﻿#include "Async/AsyncTask_JoinSession.h"
 #include "OnlineSubsystem.h"
+#include "Filters/SessionFilterRule.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "GameFramework/PlayerController.h"
 #include "Utils/NexusOnlineHelpers.h"
@@ -7,28 +8,28 @@
 #define LOCTEXT_NAMESPACE "NexusOnline|JoinSession"
 
 // ──────────────────────────────────────────────
-// Create & configure async node
+// Factory
 // ──────────────────────────────────────────────
-UAsyncTask_JoinSession* UAsyncTask_JoinSession::JoinSession( UObject* WorldContextObject, const FOnlineSessionSearchResultData& SessionResult, ENexusSessionType SessionType)
+UAsyncTask_JoinSession* UAsyncTask_JoinSession::JoinSession( UObject* WorldContextObject, const FOnlineSessionSearchResultData& SessionResult, bool bAutoTravel, ENexusSessionType SessionType)
 {
 	UAsyncTask_JoinSession* Node = NewObject<UAsyncTask_JoinSession>();
 	Node->WorldContextObject = WorldContextObject;
 	Node->RawResult = SessionResult.RawResult;
 	Node->DesiredType = SessionType;
+	Node->bShouldAutoTravel = bAutoTravel;
 
 	return Node;
 }
 
 // ──────────────────────────────────────────────
-// Start the join operation
+// Activate : Entry Point
 // ──────────────────────────────────────────────
 void UAsyncTask_JoinSession::Activate()
 {
 	if (!WorldContextObject)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Invalid WorldContextObject."));
+		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Invalid WorldContextObject."));
 		OnFailure.Broadcast();
-		
 		return;
 	}
 
@@ -42,95 +43,152 @@ void UAsyncTask_JoinSession::Activate()
 	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
 	if (!Session.IsValid())
 	{
-		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Online session interface invalid."));
+		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Online session interface invalid."));
 		OnFailure.Broadcast();
-		
 		return;
 	}
 
 	const FName InternalSessionName = NexusOnline::SessionTypeToName(DesiredType);
+	const int32 MaxPublic = RawResult.Session.SessionSettings.NumPublicConnections;
+	const int32 OpenPublic = RawResult.Session.NumOpenPublicConnections;
 
-	// Check available slots (public/private)
-	const int32 MaxPublicConnections = RawResult.Session.SessionSettings.NumPublicConnections;
-	const int32 MaxPrivateConnections = RawResult.Session.SessionSettings.NumPrivateConnections;
-	const int32 OpenPublicConnections = RawResult.Session.NumOpenPublicConnections;
-	const int32 OpenPrivateConnections = RawResult.Session.NumOpenPrivateConnections;
-
-	const bool bHasOpenPublicConnections = OpenPublicConnections > 0;
-	const bool bHasOpenPrivateConnections = OpenPrivateConnections > 0;
-
-	if (!bHasOpenPublicConnections && !bHasOpenPrivateConnections)
+	if (MaxPublic > 0 && OpenPublic <= 0)
 	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("[JoinSession] Session '%s' is full (%d/%d players)."),
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[JoinSession] Session '%s' appears full (%d/%d). Aborting."),
 			*InternalSessionName.ToString(),
-			(MaxPublicConnections - OpenPublicConnections) + (MaxPrivateConnections - OpenPrivateConnections),
-			MaxPublicConnections + MaxPrivateConnections);
-
+			(MaxPublic - OpenPublic),
+			MaxPublic);
+		
 		OnFailure.Broadcast();
 		return;
 	}
+	
+	if (Session->GetNamedSession(InternalSessionName))
+	{
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[JoinSession] Existing session found. Leaving before joining new one..."));
+		
+		DestroyDelegateHandle = Session->AddOnDestroySessionCompleteDelegate_Handle(
+			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UAsyncTask_JoinSession::OnOldSessionDestroyed)
+		);
+		
+		Session->DestroySession(InternalSessionName);
+		return;
+	}
+
+	JoinSessionInternal();
+}
+
+// ──────────────────────────────────────────────
+// Step 1.5: Old Session Destroyed
+// ──────────────────────────────────────────────
+void UAsyncTask_JoinSession::OnOldSessionDestroyed(FName SessionName, bool bWasSuccessful)
+{
+	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+	
+	if (Session.IsValid())
+	{
+		Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);
+	}
+	
+	JoinSessionInternal();
+}
+
+// ──────────────────────────────────────────────
+// Step 2: Internal Join Logic
+// ──────────────────────────────────────────────
+void UAsyncTask_JoinSession::JoinSessionInternal()
+{
+	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+	if (!Session.IsValid())
+	{
+		OnFailure.Broadcast();
+		return;
+	}
+
+	const FName InternalSessionName = NexusOnline::SessionTypeToName(DesiredType);
 
 	JoinDelegateHandle = Session->AddOnJoinSessionCompleteDelegate_Handle
 	(
 		FOnJoinSessionCompleteDelegate::CreateUObject(this, &UAsyncTask_JoinSession::OnJoinSessionComplete)
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("[JoinSession] Attempting to join session type '%s'..."), *InternalSessionName.ToString());
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[JoinSession] Joining session '%s'..."), *InternalSessionName.ToString());
 
-	if (!Session->JoinSession(0, InternalSessionName, RawResult))
+	TSharedPtr<const FUniqueNetId> LocalPlayerId;
+	if (APlayerController* PC = World->GetFirstPlayerController())
 	{
-		UE_LOG(LogTemp, Error, TEXT("[JoinSession] JoinSession() failed to start."));
-		OnFailure.Broadcast();
+		if (ULocalPlayer* LP = PC->GetLocalPlayer())
+		{
+			LocalPlayerId = LP->GetPreferredUniqueNetId().GetUniqueNetId();
+		}
+	}
+
+	if (!LocalPlayerId.IsValid())
+	{
+		if (!Session->JoinSession(0, InternalSessionName, RawResult))
+		{
+			Session->ClearOnJoinSessionCompleteDelegate_Handle(JoinDelegateHandle);
+			OnFailure.Broadcast();
+		}
+	}
+	else
+	{
+		if (!Session->JoinSession(*LocalPlayerId, InternalSessionName, RawResult))
+		{
+			Session->ClearOnJoinSessionCompleteDelegate_Handle(JoinDelegateHandle);
+			OnFailure.Broadcast();
+		}
 	}
 }
 
 // ──────────────────────────────────────────────
-// 📩 Callback : join result
+// Step 3: Completion & Travel
 // ──────────────────────────────────────────────
 void UAsyncTask_JoinSession::OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
 {
 	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
 	if (!World)
-	{
-		OnFailure.Broadcast();
-		return;
-	}
+		return; 
 
 	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
-	if (!Session.IsValid())
+	if (Session.IsValid())
+	{
+		Session->ClearOnJoinSessionCompleteDelegate_Handle(JoinDelegateHandle);
+	}
+	else
 	{
 		OnFailure.Broadcast();
 		return;
 	}
-
-	Session->ClearOnJoinSessionCompleteDelegate_Handle(JoinDelegateHandle);
 
 	if (Result != EOnJoinSessionCompleteResult::Success)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Failed with code %d."), static_cast<int32>(Result));
+		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Failed with code %d."), static_cast<int32>(Result));
 		OnFailure.Broadcast();
-		
 		return;
 	}
 
 	FString ConnectString;
 	if (!Session->GetResolvedConnectString(SessionName, ConnectString))
 	{
-		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Failed to resolve connect string."));
+		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Failed to resolve connect string (URL)."));
 		OnFailure.Broadcast();
-		
 		return;
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("[JoinSession] Connecting to: %s"), *ConnectString);
-
-	if (APlayerController* PC = World->GetFirstPlayerController())
-	{
-		PC->ClientTravel(ConnectString, TRAVEL_Absolute);
-	}
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[JoinSession] Success. Connect String: %s"), *ConnectString);
 
 	OnSuccess.Broadcast();
+	if (bShouldAutoTravel)
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			UE_LOG(LogNexusOnlineFilter, Log, TEXT("[JoinSession] Executing ClientTravel..."));
+			PC->ClientTravel(ConnectString, TRAVEL_Absolute);
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

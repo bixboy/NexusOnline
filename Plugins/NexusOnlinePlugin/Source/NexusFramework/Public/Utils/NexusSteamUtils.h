@@ -1,17 +1,14 @@
 ﻿#pragma once
-
 #include "CoreMinimal.h"
-#include "OnlineSubsystem.h"
-#include "OnlineSubsystemNames.h"
-#include "Interfaces/OnlineExternalUIInterface.h"
-#include "Interfaces/OnlineFriendsInterface.h"
-#include "Interfaces/OnlineIdentityInterface.h"
-#include "Interfaces/OnlinePresenceInterface.h"
-#include "Interfaces/OnlineSessionInterface.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include "NexusSteamUtils.generated.h"
+#include "OnlineSubsystem.h"
+#include "Interfaces/OnlineFriendsInterface.h"
+#include "Interfaces/OnlinePresenceInterface.h"
+#include "Interfaces/OnlineExternalUIInterface.h"
+#include "NexusSteamUtils.generated.h" // Toujours en dernier
 
-DECLARE_DYNAMIC_DELEGATE_OneParam(FOnSteamFriendsLoaded, bool, bSuccess);
+class IOnlineSubsystem;
+
 
 USTRUCT(BlueprintType)
 struct FSteamPresence
@@ -38,6 +35,9 @@ struct FSteamFriendInfo
 	UPROPERTY(BlueprintReadOnly) FUniqueNetIdRepl UniqueId;
 };
 
+
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSteamFriendsLoaded, bool, bSuccess, const TArray<FSteamFriendInfo>&, FriendsList);
+
 UCLASS()
 class NEXUSFRAMEWORK_API UNexusSteamUtils : public UBlueprintFunctionLibrary
 {
@@ -45,7 +45,7 @@ class NEXUSFRAMEWORK_API UNexusSteamUtils : public UBlueprintFunctionLibrary
 
 public:
 	// ────────────────────────────────────────────────
-	// Identité locale
+	// Identité
 	// ────────────────────────────────────────────────
 
 	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
@@ -57,18 +57,15 @@ public:
 	// ────────────────────────────────────────────────
 	// Amis
 	// ────────────────────────────────────────────────
-
+	
 	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
-	static void GetSteamFriends(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, int32 UserIndex = 0);
-
-	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
+	static bool GetCachedFriends(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, int32 UserIndex = 0);
+	
+	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject", AutoCreateRefTerm="OnCompleted"))
 	static void ReadSteamFriends(UObject* WorldContextObject, const FOnSteamFriendsLoaded& OnCompleted, int32 UserIndex = 0, FName ListName = "default");
 
-	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
-	static void GetSteamFriendsCached(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, float RefreshDelaySeconds = 5.f, int32 UserIndex = 0, FName ListName = "default");
-
 	// ────────────────────────────────────────────────
-	// Sessions & Overlays
+	// Sessions & UI
 	// ────────────────────────────────────────────────
 
 	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
@@ -81,7 +78,7 @@ public:
 	static bool ShowProfileOverlay(UObject* WorldContextObject, const FUniqueNetIdRepl& PlayerId, int32 UserIndex = 0);
 
 	// ────────────────────────────────────────────────
-	// État OSS / Presence
+	// État & Presence
 	// ────────────────────────────────────────────────
 
 	UFUNCTION(BlueprintPure, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
@@ -91,17 +88,6 @@ public:
 	static bool GetLocalPresence(UObject* WorldContextObject, FSteamPresence& OutPresence, int32 UserIndex = 0);
 
 private:
-	// Safe getters
-	static IOnlineSubsystem* GetOSS(UObject* WorldContextObject);
-	static IOnlineIdentityPtr GetIdentity(UObject* WorldContextObject);
-	static IOnlineFriendsPtr GetFriends(UObject* WorldContextObject);
-	static IOnlineExternalUIPtr GetExternalUI(UObject* WorldContextObject);
-	static IOnlinePresencePtr GetPresence(UObject* WorldContextObject);
-	static IOnlineSessionPtr GetSession(UObject* WorldContextObject);
-
-	static TSharedPtr<const FUniqueNetId> GetLocalUserId(UObject* WorldContextObject, int32 UserIndex);
-
-	// Helpers
 	static void BuildFriendInfo(const TSharedRef<class FOnlineFriend>& InFriend, FSteamFriendInfo& OutInfo);
 	static void FillFriendsFromOSS(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, int32 UserIndex, FName ListName);
 };

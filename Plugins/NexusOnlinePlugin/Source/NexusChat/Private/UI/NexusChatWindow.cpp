@@ -1,5 +1,9 @@
 #include "UI/NexusChatWindow.h"
-#include "Components/ScrollBox.h"
+#include "UI/NexusChatChannelList.h"
+#include "Core/NexusChatConfig.h"
+#include "Components/ListView.h"
+#include "UI/NexusChatMessageObj.h"
+#include "Components/CheckBox.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
@@ -8,6 +12,7 @@
 #include "UI/NexusChatMessageRow.h"
 #include "UI/NexusChatTabButton.h"
 #include "GameFramework/GameStateBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerState.h"
 
 
@@ -43,8 +48,6 @@ void UNexusChatWindow::NativeConstruct()
 	{
 		if (UNexusChatSubsystem* Subsystem = World->GetSubsystem<UNexusChatSubsystem>())
 		{
-			Subsystem->OnPlayerLinkClicked.AddDynamic(this, &UNexusChatWindow::HandlePlayerLinkClicked);
-			Subsystem->OnUrlLinkClicked.AddDynamic(this, &UNexusChatWindow::HandleUrlLinkClicked);
 			Subsystem->OnAnyLinkClicked.AddDynamic(this, &UNexusChatWindow::HandleAnyLinkClicked);
 		}
 	}
@@ -63,10 +66,29 @@ void UNexusChatWindow::NativeConstruct()
 			}
 		}
 
-		if (AddChannelButton)
+		if (ChannelListButton)
 		{
-			AddChannelButton->SetVisibility(ESlateVisibility::Visible);
-			AddChannelButton->OnClicked.AddDynamic(this, &UNexusChatWindow::OnAddChannelClicked);
+			ChannelListButton->SetVisibility(ESlateVisibility::Visible);
+			ChannelListButton->OnClicked.AddDynamic(this, &UNexusChatWindow::OnChannelListButtonClicked);
+		}
+
+		if (ChannelList)
+		{
+			// Initialize list and hide it by default? Or keep state.
+			ChannelList->Init(this);
+			ChannelList->SetVisibility(ESlateVisibility::Collapsed);
+		}
+
+		if (NotificationToggle)
+		{
+			NotificationToggle->SetVisibility(ESlateVisibility::Visible);
+			NotificationToggle->OnCheckStateChanged.AddDynamic(this, &UNexusChatWindow::OnNotificationToggled);
+			
+			// Set initial state from Config
+			if (const UNexusChatConfig* Config = GetDefault<UNexusChatConfig>()) 
+			{
+				NotificationToggle->SetIsChecked(Config->bEnableNotifications);
+			}
 		}
 
 		SelectTab(FName("Global"), true);
@@ -87,8 +109,6 @@ void UNexusChatWindow::NativeDestruct()
 	{
 		if (UNexusChatSubsystem* Subsystem = World->GetSubsystem<UNexusChatSubsystem>())
 		{
-			Subsystem->OnPlayerLinkClicked.RemoveDynamic(this, &UNexusChatWindow::HandlePlayerLinkClicked);
-			Subsystem->OnUrlLinkClicked.RemoveDynamic(this, &UNexusChatWindow::HandleUrlLinkClicked);
 			Subsystem->OnAnyLinkClicked.RemoveDynamic(this, &UNexusChatWindow::HandleAnyLinkClicked);
 		}
 	}
@@ -102,28 +122,65 @@ void UNexusChatWindow::NativeDestruct()
 
 void UNexusChatWindow::HandleMessageReceived(const FNexusChatMessage& Msg)
 {
-	if (!ChatScrollBox || !MessageRowClass)
+	if (!ChatListView || !MessageRowClass)
 		return;
+
+	// Dynamic Tab Creation for Whispers (Ensure this runs before filtering!)
+	if (bEnableChatTabs && Msg.Channel == ENexusChatChannel::Whisper)
+	{
+		if (APlayerController* PC = GetOwningPlayer()) 
+		{
+			FString MyName = PC->PlayerState ? PC->PlayerState->GetPlayerName() : "";
+			FString OtherParty = (Msg.SenderName == MyName) ? Msg.TargetName : Msg.SenderName;
+			
+			if (!OtherParty.IsEmpty() && OtherParty != "System")
+			{
+				GetOrCreatePrivateTab(FName(*OtherParty));
+			}
+		}
+	}
 
 	if (UNexusChatSubsystem* Subsystem = GetWorld()->GetSubsystem<UNexusChatSubsystem>())
 	{
 		if (!Subsystem->IsMessagePassesFilter(Msg))
-		{
 			return;
-		}
 	}
 
-	if (UNexusChatMessageRow* NewRow = CreateWidget<UNexusChatMessageRow>(this, MessageRowClass))
+	if (UNexusChatMessageObj* MessageObj = NewObject<UNexusChatMessageObj>(this))
 	{
-		NewRow->InitWidget(Msg);
-		ChatScrollBox->AddChild(NewRow);
-		ChatScrollBox->ScrollToEnd();
+		MessageObj->Message = Msg;
+		ChatListView->AddItem(MessageObj);
+		ChatListView->ScrollIndexIntoView(ChatListView->GetNumItems() - 1);
 
-		if (ChatScrollBox->GetChildrenCount() > MaxChatLines)
+		if (ChatListView->GetNumItems() > MaxChatLines)
 		{
-			ChatScrollBox->RemoveChildAt(0);
+			if (UObject* OldObj = ChatListView->GetItemAt(0))
+			{
+				ChatListView->RemoveItem(OldObj);
+			}
 		}
 	}
+
+	// Notification Sound Logic
+	if (UNexusChatConfig* Config = GetMutableDefault<UNexusChatConfig>())
+	{
+		if (Config->bEnableNotifications && Config->NotificationSound)
+		{
+			if (APlayerController* PC = GetOwningPlayer())
+			{
+				FString MyName = PC->PlayerState ? PC->PlayerState->GetPlayerName() : "";
+				if (Msg.SenderName != MyName)
+				{
+					UGameplayStatics::PlaySound2D(this, Config->NotificationSound);
+				}
+			}
+		}
+	}
+}
+
+void UNexusChatWindow::OnTabClicked(FName ChannelName, bool bIsGeneral)
+{
+	SelectTab(ChannelName, bIsGeneral);
 }
 
 void UNexusChatWindow::HandleTextCommitted(const FText& Text, ETextCommit::Type CommitMethod)
@@ -160,12 +217,28 @@ void UNexusChatWindow::HandleTextCommitted(const FText& Text, ETextCommit::Type 
 
 		if (!bFoundEnum)
 		{
-			TargetRouting = ENexusChatChannel::Global;
+			TargetRouting = ENexusChatChannel::Custom;
 			TargetChannelName = ActiveChannelName;
 		}
 	}
 
 	FString FormattedMessage = FormatOutgoingMessage(Text.ToString(), TargetRouting);
+
+	// Auto-Reply Logic for Whisper Tab
+	if (TargetRouting == ENexusChatChannel::Whisper && !FormattedMessage.StartsWith(TEXT("/")))
+	{
+		FormattedMessage = TEXT("/r ") + FormattedMessage;
+	}
+	// Auto-Command for Dynamic Private Tabs
+	else if (PrivateMessageTabs.Contains(ActiveChannelName) && !FormattedMessage.StartsWith(TEXT("/")))
+	{
+		FormattedMessage = FString::Printf(TEXT("/w %s %s"), *ActiveChannelName.ToString(), *FormattedMessage);
+	}
+	// Auto-Command for Dynamic Private Tabs
+	else if (PrivateMessageTabs.Contains(ActiveChannelName) && !FormattedMessage.StartsWith(TEXT("/")))
+	{
+		FormattedMessage = FString::Printf(TEXT("/w %s %s"), *ActiveChannelName.ToString(), *FormattedMessage);
+	}
 	
 	if (TargetChannelName.IsNone())
 	{
@@ -272,7 +345,8 @@ void UNexusChatWindow::HandleAutoCompletion()
 		
 		for (APlayerState* PS : GameState->PlayerArray)
 		{
-			if (PS)
+			// Fixed: Skip null player states, process valid ones
+			if (!PS)
 				continue;
 			
 			FString Name = PS->GetPlayerName();
@@ -320,113 +394,111 @@ void UNexusChatWindow::HandleAnyLinkClicked(const FString& LinkType, const FStri
 // TAB SYSTEM
 // ════════════════════════════════════════════════════════════════════════════════
 
+void UNexusChatWindow::OpenChannel(FName ChannelName, bool bIsPrivate)
+{
+	// 1. Handle Global
+	if (ChannelName == FName("Global"))
+	{
+		SelectTab(ChannelName, true);
+		return;
+	}
+
+	// 2. Handle Existing
+	if (ChannelTabButtons.Contains(ChannelName))
+	{
+		SelectTab(ChannelName, false);
+		return;
+	}
+
+	// 3. Create New
+	if (bIsPrivate)
+	{
+		GetOrCreatePrivateTab(ChannelName); // Adds to PrivateMessageTabs and UI
+	}
+	else
+	{
+		// Generic Public Tab (Team, Party, etc.)
+		UNexusChatTabButton* NewTab = CreateTabButton(FText::FromName(ChannelName), ChannelName, false);
+		if (NewTab)
+		{
+			if (TabContainer) TabContainer->AddChild(NewTab);
+			ChannelTabButtons.Add(ChannelName, NewTab);
+		}
+	}
+
+	// 4. Select it
+	SelectTab(ChannelName, false);
+}
+
 void UNexusChatWindow::SelectTab(FName ChannelName, bool bIsGeneral)
 {
 	UNexusChatSubsystem* Subsystem = GetWorld()->GetSubsystem<UNexusChatSubsystem>();
 	if (!Subsystem || !ChatComponent)
-	{
 		return;
-	}
 
 	ActiveChannelName = ChannelName;
 	bIsGeneralTabActive = bIsGeneral;
 
 	UpdateTabStyles();
 
-	// Update filters
 	Subsystem->ClearHistoryFilters();
-	
 	if (bIsGeneral)
 	{
-		// General Tab: Show everything, no whitelist/blacklist (or blacklisted spam if any)
 		Subsystem->SetWhitelistMode(false); 
 	}
 	else
 	{
-		// Specific Channel Tab: Show ONLY this channel
 		Subsystem->SetWhitelistMode(true);
 		Subsystem->AddHistoryFilter(ChannelName);
 	}
 
-	// Refresh UI
-	if (ChatScrollBox)
+	if (ChatListView)
 	{
-		ChatScrollBox->ClearChildren();
+		ChatListView->ClearListItems();
 		
-		// Re-add messages from LOCAL COMPONENT HISTORY which contains everything (Party, Team, etc.)
-		// The Subsystem only contains Global messages.
 		TArray<FNexusChatMessage> Messages = ChatComponent->GetClientChatHistory();
 		for (const FNexusChatMessage& Msg : Messages)
 		{
-			// We reuse HandleMessageReceived but we must ensure it respects the filter now
-			// To avoid duplicating logic, we modify HandleMessageReceived to check filter.
 			HandleMessageReceived(Msg);
 		}
 		
-		ChatScrollBox->ScrollToEnd();
+		ChatListView->ScrollIndexIntoView(ChatListView->GetNumItems() - 1);
 	}
 }
 
-void UNexusChatWindow::OnAddChannelClicked()
+void UNexusChatWindow::OnChannelListButtonClicked()
 {
-	// If user hasn't configured AvailableChannels, populate defaults
-	if (AvailableChannels.Num() == 0)
+	if (ChannelList)
 	{
-		const TArray<ENexusChatChannel> DefaultChannels = { 
-			ENexusChatChannel::Team, 
-			ENexusChatChannel::Party, 
-			ENexusChatChannel::Whisper, 
-			ENexusChatChannel::System 
-		};
-		
-		for (ENexusChatChannel Chan : DefaultChannels)
+		if (ChannelList->GetVisibility() == ESlateVisibility::Collapsed || ChannelList->GetVisibility() == ESlateVisibility::Hidden)
 		{
-			AvailableChannels.Add(FName(*UEnum::GetDisplayValueAsText(Chan).ToString()));
+			ChannelList->SetVisibility(ESlateVisibility::Visible);
+			ChannelList->RefreshList();
 		}
-		// Add some custom examples if empty (for testing/showcase)
-		AvailableChannels.Add(FName("Trade"));
-		AvailableChannels.Add(FName("Guild"));
-	}
-
-	for (FName ChanName : AvailableChannels)
-	{
-		if (!ChannelTabButtons.Contains(ChanName))
+		else
 		{
-			// Create this tab
-			UNexusChatTabButton* NewTab = CreateTabButton(FText::FromName(ChanName), ChanName, false);
-			
-			if (NewTab && TabContainer)
-			{
-				TabContainer->AddChild(NewTab);
-				ChannelTabButtons.Add(ChanName, NewTab);
-				
-				// Auto select
-				SelectTab(ChanName, false);
-			}
-			
-			break; // Add one at a time
+			ChannelList->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
 }
 
-void UNexusChatWindow::OnTabClicked(FName ChannelName, bool bIsGeneral)
+void UNexusChatWindow::OnNotificationToggled(bool bIsChecked)
 {
-	SelectTab(ChannelName, bIsGeneral);
+	if (UNexusChatConfig* Config = GetMutableDefault<UNexusChatConfig>())
+	{
+		Config->bEnableNotifications = bIsChecked;
+	}
 }
 
 UNexusChatTabButton* UNexusChatWindow::CreateTabButton(const FText& Label, FName ChannelName, bool bIsGeneral)
 {
-	UNexusChatTabButton* Button = NewObject<UNexusChatTabButton>(this);
-	
 	UTextBlock* Text = NewObject<UTextBlock>(this);
 	Text->SetText(Label);
-	// Basic styling
 	Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	Text->SetFont(FCoreStyle::Get().GetFontStyle("NormalFont"));
-	
+
+	UNexusChatTabButton* Button = NewObject<UNexusChatTabButton>(this);
 	Button->AddChild(Text);
-	
-	// Init internal data and connection
 	Button->Init(this, ChannelName, bIsGeneral);
 	
 	return Button;
@@ -434,7 +506,6 @@ UNexusChatTabButton* UNexusChatWindow::CreateTabButton(const FText& Label, FName
 
 void UNexusChatWindow::UpdateTabStyles()
 {
-	// Opacity 1.0 for active, 0.5 for inactive
 	const FLinearColor ActiveColor(1.0f, 1.0f, 1.0f, 1.0f);
 	const FLinearColor InactiveColor(1.0f, 1.0f, 1.0f, 0.5f);
 
@@ -451,4 +522,25 @@ void UNexusChatWindow::UpdateTabStyles()
 			Btn->SetBackgroundColor(bIsMe ? ActiveColor : InactiveColor);
 		}
 	}
+}
+
+UNexusChatTabButton* UNexusChatWindow::GetOrCreatePrivateTab(FName PlayerName)
+{
+	if (ChannelTabButtons.Contains(PlayerName))
+	{
+		return ChannelTabButtons[PlayerName];
+	}
+
+	if (!TabContainer)
+		return nullptr;
+
+	UNexusChatTabButton* NewTab = CreateTabButton(FText::FromName(PlayerName), PlayerName, false);
+	if (NewTab)
+	{
+		TabContainer->AddChild(NewTab);
+		ChannelTabButtons.Add(PlayerName, NewTab);
+		PrivateMessageTabs.Add(PlayerName);
+	}
+	
+	return NewTab;
 }

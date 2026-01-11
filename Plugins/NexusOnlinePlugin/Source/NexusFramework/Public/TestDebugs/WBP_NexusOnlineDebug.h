@@ -1,5 +1,4 @@
 ﻿#pragma once
-
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Async/AsyncTask_FindSessions.h"
@@ -7,9 +6,7 @@
 #include "Components/TextBlock.h"
 #include "WBP_NexusOnlineDebug.generated.h"
 
-/**
- * Debug utility widget for testing Nexus Online session features.
- */
+
 UCLASS()
 class NEXUSFRAMEWORK_API UWBP_NexusOnlineDebug : public UUserWidget
 {
@@ -20,7 +17,6 @@ public:
 	// ───────────────────────────────
 	// UI References
 	// ───────────────────────────────
-
 	UPROPERTY(meta = (BindWidget))
 	UButton* Button_Create;
 
@@ -33,33 +29,15 @@ public:
 	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_SessionInfo;
 
+	UPROPERTY(meta = (BindWidget))
+	UTextBlock* Text_SessionId;
+
 	// ───────────────────────────────
 	// Runtime Data
 	// ───────────────────────────────
-
-	/** List of sessions found during last search. */
+	
 	UPROPERTY(BlueprintReadOnly, Category = "Nexus|Online")
 	TArray<FOnlineSessionSearchResultData> FoundSessions;
-
-	/** Index of the selected session to join (default = 0). */
-	UPROPERTY(BlueprintReadOnly, Category = "Nexus|Online")
-	int32 SelectedSessionIndex = 0;
-
-	/** Current active session name (or “No session”). */
-	UPROPERTY(BlueprintReadOnly, Category = "Nexus|Online")
-	FString CurrentSessionName = TEXT("No session");
-
-	/** Current session ID. */
-	UPROPERTY(BlueprintReadOnly, Category="Nexus|Online")
-	FString CurrentSessionId = TEXT("N/A");
-
-	/** Number of players currently connected. */
-	UPROPERTY(BlueprintReadOnly, Category = "Nexus|Online")
-	int32 CurrentPlayers = 0;
-
-	/** Maximum number of players allowed in the session. */
-	UPROPERTY(BlueprintReadOnly, Category = "Nexus|Online")
-	int32 MaxPlayers = 0;
 
 	UPROPERTY(EditAnywhere, Category = "Nexus|Online")
 	FString MapName = TEXT("TestMap");
@@ -67,51 +45,41 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Nexus|Online")
 	bool IsLan = false;
 
-	
 	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	// ───────────────────────────────
-	// Button Callbacks
+	// Callbacks UI
 	// ───────────────────────────────
-	UFUNCTION()
-	void OnCreateClicked();
+	UFUNCTION() void OnCreateClicked();
+	UFUNCTION() void OnJoinClicked();
+	UFUNCTION() void OnLeaveClicked();
+
+	// ───────────────────────────────
+	// Callbacks Async Tasks
+	// ───────────────────────────────
+	UFUNCTION() void OnCreateSuccess();
+	UFUNCTION() void OnCreateFailure();
+
+	UFUNCTION() void OnFindSessionsCompleted(bool bWasSuccessful, const TArray<FOnlineSessionSearchResultData>& Results);
+
+	UFUNCTION() void OnJoinSuccess();
+	UFUNCTION() void OnJoinFailure();
+
+	UFUNCTION() void OnLeaveSuccess();
+	UFUNCTION() void OnLeaveFailure();
+
+	// ───────────────────────────────
+	// Live Updates (Manager)
+	// ───────────────────────────────
 	
-	UFUNCTION()
-	void OnJoinClicked();
-	
-	UFUNCTION()
-	void OnLeaveClicked();
-
-	// ───────────────────────────────
-	// Async Task Callbacks
-	// ───────────────────────────────
-	UFUNCTION()
-	void OnCreateSuccess();
-	
-	UFUNCTION()
-	void OnCreateFailure();
+	void UpdateSessionDisplay();
 
 	UFUNCTION()
-	void OnFindSessionsCompleted(bool bWasSuccessful, const TArray<FOnlineSessionSearchResultData>& Results);
+	void OnPlayerCountChanged(int32 NewCount);
 
-	UFUNCTION()
-	void OnJoinSuccess();
-	
-	UFUNCTION()
-	void OnJoinFailure();
-
-	UFUNCTION()
-	void OnLeaveSuccess();
-	
-	UFUNCTION()
-	void OnLeaveFailure();
-
-	// ───────────────────────────────
-	// Session Information
-	// ───────────────────────────────
-	UFUNCTION()
-	void UpdateSessionInfo();
-
-	UFUNCTION(BlueprintCallable, Category = "Nexus|Online")
-	FText GetSessionInfoText();
+private:
+	bool bIsBoundToManager = false;
+	TWeakObjectPtr<class AOnlineSessionManager> CachedManager;
+	void TryBindToSessionManager();
 };

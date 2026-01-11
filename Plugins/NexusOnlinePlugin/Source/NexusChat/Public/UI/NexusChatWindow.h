@@ -4,13 +4,15 @@
 #include "Types/NexusChatTypes.h"
 #include "Core/NexusChatComponent.h"
 #include "Core/NexusChatSubsystem.h"
-#include "Components/ScrollBox.h"
+#include "Components/ListView.h"
 #include "Components/EditableTextBox.h"
+#include "Components/CheckBox.h"
 #include "UI/NexusChatMessageRow.h"
 #include "NexusChatWindow.generated.h"
 
 
 class UNexusChatTabButton;
+class UNexusChatChannelList;
 
 
 UCLASS()
@@ -20,7 +22,7 @@ class NEXUSCHAT_API UNexusChatWindow : public UUserWidget
 
 public:
 	UPROPERTY(meta = (BindWidget), BlueprintReadOnly)
-	UScrollBox* ChatScrollBox;
+	UListView* ChatListView;
 
 	UPROPERTY(meta = (BindWidget), BlueprintReadOnly)
 	UEditableTextBox* ChatInput;
@@ -40,6 +42,15 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional), BlueprintReadOnly)
 	class UButton* AddChannelButton;
 
+	UPROPERTY(meta = (BindWidgetOptional), BlueprintReadOnly)
+	class UButton* ChannelListButton;
+
+	UPROPERTY(meta = (BindWidgetOptional), BlueprintReadOnly)
+	class UCheckBox* NotificationToggle;
+
+	UPROPERTY(meta = (BindWidgetOptional), BlueprintReadOnly)
+	class UNexusChatChannelList* ChannelList;
+
 	// ────────────────────────────────────────────
 	// TAB SYSTEM
 	// ────────────────────────────────────────────
@@ -51,8 +62,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NexusChat")
 	void SelectTab(FName ChannelName, bool bIsGeneral);
 
+	UFUNCTION(BlueprintCallable, Category = "NexusChat")
+	void OpenChannel(FName ChannelName, bool bIsPrivate);
+
 	UFUNCTION()
-	void OnAddChannelClicked();
+	void OnChannelListButtonClicked();
+
+	UFUNCTION()
+	void OnNotificationToggled(bool bIsChecked);
 
 	UFUNCTION()
 	void OnTabClicked(FName ChannelName, bool bIsGeneral);
@@ -119,14 +136,19 @@ private:
 	bool bIsGeneralTabActive = true;
 	FName ActiveChannelName = NAME_None;
 
+	/** Set of channels that are private conversations (Player Names) */
+	UPROPERTY()
+	TSet<FName> PrivateMessageTabs;
+
 	/** We need to keep references to the dynamically created tab buttons to style them selected/unselected */
 	UPROPERTY()
-	TMap<FName, UButton*> ChannelTabButtons;
+	TMap<FName, UNexusChatTabButton*> ChannelTabButtons;
 	
 	UPROPERTY()
-	UButton* GeneralTabButton = nullptr;
+	UNexusChatTabButton* GeneralTabButton = nullptr;
 
 	void UpdateTabStyles();
 	
 	UNexusChatTabButton* CreateTabButton(const FText& Label, FName ChannelName, bool bIsGeneral);
+	UNexusChatTabButton* GetOrCreatePrivateTab(FName PlayerName);
 };

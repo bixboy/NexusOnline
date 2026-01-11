@@ -7,9 +7,6 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSessionDestroyed);
 
-/**
- * Asynchronous Blueprint node that destroys an active online session.
- */
 UCLASS()
 class NEXUSFRAMEWORK_API UAsyncTask_DestroySession : public UBlueprintAsyncActionBase
 {
@@ -36,11 +33,8 @@ public:
 
 private:
 
-	// Internal Callbacks
 	void OnDestroySessionComplete(FName SessionName, bool bWasSuccessful);
-
 	
-	// Internal Data
 	UPROPERTY()
 	UObject* WorldContextObject = nullptr;
 	

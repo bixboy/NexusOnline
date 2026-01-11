@@ -248,10 +248,14 @@ EOnlineComparisonOp::Type FSessionSearchFilter::ToOnlineOp() const
 
 bool FSessionSearchFilter::ApplyToSearchSettings(FOnlineSessionSearch& Search) const
 {
-    if (!bApplyToQuerySettings || Key.IsNone())
-        return false;
+	if (!bApplyToQuerySettings || Key.IsNone())
+		return false;
 
-    const EOnlineComparisonOp::Type Op = ToOnlineOp();
+	if (ComparisonOp == ENexusSessionComparisonOp::Exists)
+		return false; 
+
+	const EOnlineComparisonOp::Type Op = ToOnlineOp();
+	
     switch (Value.Type)
     {
     	

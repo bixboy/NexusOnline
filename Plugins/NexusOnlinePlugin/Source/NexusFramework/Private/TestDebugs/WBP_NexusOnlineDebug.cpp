@@ -4,167 +4,236 @@
 #include "Async/AsyncTask_FindSessions.h"
 #include "Async/AsyncTask_JoinSession.h"
 #include "Filters/Rules/SessionFilterRule_Ping.h"
-#include "Filters/Rules/SessionSortRule_Ping.h"
 #include "Kismet/GameplayStatics.h"
 #include "Managers/OnlineSessionManager.h"
 #include "Utils/NexusOnlineHelpers.h"
-#include "Utils/NexusSteamUtils.h"
+#include "OnlineSubsystem.h"
+#include "Interfaces/OnlineSessionInterface.h"
+#include "Subsystems/NexusMigrationSubsystem.h" 
 
 #define LOCTEXT_NAMESPACE "NexusOnline|DebugWidget"
 
-// ──────────────────────────────────────────────
-// Initialization
-// ──────────────────────────────────────────────
+
 void UWBP_NexusOnlineDebug::NativeConstruct()
 {
 	Super::NativeConstruct();
 
 	if (Button_Create)
 		Button_Create->OnClicked.AddDynamic(this, &UWBP_NexusOnlineDebug::OnCreateClicked);
-
+	
 	if (Button_Join)
 		Button_Join->OnClicked.AddDynamic(this, &UWBP_NexusOnlineDebug::OnJoinClicked);
-
+	
 	if (Button_Leave)
 		Button_Leave->OnClicked.AddDynamic(this, &UWBP_NexusOnlineDebug::OnLeaveClicked);
 
-	UpdateSessionInfo();
+	UpdateSessionDisplay();
+	TryBindToSessionManager();
+}
+
+void UWBP_NexusOnlineDebug::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	
+	// Auto-Reset Binding if Manager died (Level Travel)
+	if (bIsBoundToManager && !CachedManager.IsValid())
+	{
+		bIsBoundToManager = false;
+	}
+
+	if (!bIsBoundToManager)
+	{
+		TryBindToSessionManager();
+	}
 }
 
 // ──────────────────────────────────────────────
-// CREATE SESSION
+// CREATE
 // ──────────────────────────────────────────────
 void UWBP_NexusOnlineDebug::OnCreateClicked()
 {
 	FSessionSettingsData Settings;
-	Settings.SessionName = TEXT("DebugSession");
+	Settings.SessionName = TEXT("Nexus Demo Session");
 	Settings.SessionType = ENexusSessionType::GameSession;
 	Settings.MaxPlayers = 5;
 	Settings.bIsPrivate = false;
 	Settings.bIsLAN = IsLan;
 	Settings.MapName = MapName;
 	Settings.GameMode = TEXT("Default");
-	Settings.SessionIdLength = 15;
+	Settings.SessionIdLength = 10;
+	
+	// ENABLE MIGRATION TEST
+	Settings.bAllowHostMigration = true;
+	Settings.MigrationSessionID = NexusOnline::GenerateRandomSessionId(16);
 
-	// Build version filter
+	// Cache Settings for Migration Subsystem
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UNexusMigrationSubsystem* MigSub = GI->GetSubsystem<UNexusMigrationSubsystem>())
+		{
+			MigSub->CacheSessionSettings(Settings);
+		}
+	}
+
 	FSessionSearchFilter BuildFilter;
 	BuildFilter.Key = FName("BUILD_VERSION");
 	BuildFilter.Value.Type = ENexusSessionFilterValueType::Int32;
 	BuildFilter.Value.IntValue = 1;
 
-	TArray ExtraSettings = { BuildFilter };
+	TArray<FSessionSearchFilter> ExtraSettings;
+	ExtraSettings.Add(BuildFilter);
 
-	// Launch async task
-	UAsyncTask_CreateSession* Task = UAsyncTask_CreateSession::CreateSession(GetOwningPlayer(), Settings, ExtraSettings, nullptr);
+	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Starting CreateSession Task..."));
+
+	UAsyncTask_CreateSession* Task = UAsyncTask_CreateSession::CreateSession(
+	   this, 
+	   Settings, 
+	   ExtraSettings,
+	   true, 
+	   nullptr
+	);
+
 	Task->OnSuccess.AddDynamic(this, &UWBP_NexusOnlineDebug::OnCreateSuccess);
 	Task->OnFailure.AddDynamic(this, &UWBP_NexusOnlineDebug::OnCreateFailure);
 	Task->Activate();
-
-	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Creating session..."));
 }
 
 void UWBP_NexusOnlineDebug::OnCreateSuccess()
 {
-	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Session created successfully!"));
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("[DebugWidget] Session created successfully!"));
-
-	UpdateSessionInfo();
-	UNexusSteamUtils::ShowInviteOverlay(this, "GameSession");
+	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Session Created!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("Session Created! Loading Map..."));
 }
 
 void UWBP_NexusOnlineDebug::OnCreateFailure()
 {
-	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to create session!"));
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("[DebugWidget] Failed to create session!"));
+	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Creation Failed!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Creation Failed!"));
 }
 
 // ──────────────────────────────────────────────
-// FIND & JOIN SESSION
+// JOIN
 // ──────────────────────────────────────────────
 void UWBP_NexusOnlineDebug::OnJoinClicked()
 {
-	// Basic filters
 	FSessionSearchFilter BuildFilter;
 	BuildFilter.Key = FName("BUILD_VERSION");
 	BuildFilter.Value.Type = ENexusSessionFilterValueType::Int32;
 	BuildFilter.Value.IntValue = 1;
 	BuildFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
 
-	FSessionSearchFilter PIDFilter;
-	PIDFilter.Key = NexusOnline::SESSION_KEY_PROJECT_ID_INT;
-	PIDFilter.Value.Type = ENexusSessionFilterValueType::Int32;
-	PIDFilter.Value.IntValue = NexusOnline::PROJECT_ID_VALUE_INT;
-	PIDFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
+	TArray<FSessionSearchFilter> SimpleFilters;
+	SimpleFilters.Add(BuildFilter);
 
-	TArray SimpleFilters = {BuildFilter, PIDFilter };
-
-	// Advanced ping rule (exclude >150ms)
 	USessionFilterRule_Ping* PingRule = NewObject<USessionFilterRule_Ping>(this);
-	PingRule->MaxPing = 150;
+	PingRule->MaxPing = 200; 
+	
+	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Searching sessions..."));
+	GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Yellow, TEXT("Searching..."));
 
-	// Launch search
 	UAsyncTask_FindSessions* Task = UAsyncTask_FindSessions::FindSessions(
-		GetOwningPlayer(),
+		this,
 		ENexusSessionType::GameSession,
-		9999,
+		20,
 		IsLan,
 		SimpleFilters,
-		{ },
+		{ PingRule },
 		{ },
 		nullptr
 	);
 
 	Task->OnCompleted.AddDynamic(this, &UWBP_NexusOnlineDebug::OnFindSessionsCompleted);
 	Task->Activate();
-
-	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Searching for sessions (ping < 150)..."));
 }
 
 void UWBP_NexusOnlineDebug::OnFindSessionsCompleted(bool bWasSuccessful, const TArray<FOnlineSessionSearchResultData>& Results)
 {
 	if (!bWasSuccessful || Results.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] ❌ No sessions found."));
-		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, TEXT("[DebugWidget] No sessions found."));
-		
+		UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] No sessions found."));
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, TEXT("No sessions found."));
 		return;
 	}
 
-	FoundSessions = Results;
-	const FOnlineSessionSearchResultData& First = Results[0];
+	const FOnlineSessionSearchResultData& Target = Results[0];
 
-	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Found %d session(s). Joining '%s'..."), Results.Num(), *First.SessionDisplayName);
+	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Found %d. Joining '%s' (%d/%d)..."),
+		Results.Num(), *Target.SessionDisplayName, Target.CurrentPlayers, Target.MaxPlayers);
 
-	UAsyncTask_JoinSession* JoinTask = UAsyncTask_JoinSession::JoinSession(GetOwningPlayer(), First, ENexusSessionType::GameSession);
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("Joining %s..."), *Target.SessionDisplayName));
+
+	UAsyncTask_JoinSession* JoinTask = UAsyncTask_JoinSession::JoinSession(
+		this, 
+		Target, 
+		true,
+		ENexusSessionType::GameSession
+	);
+	
 	JoinTask->OnSuccess.AddDynamic(this, &UWBP_NexusOnlineDebug::OnJoinSuccess);
 	JoinTask->OnFailure.AddDynamic(this, &UWBP_NexusOnlineDebug::OnJoinFailure);
 	JoinTask->Activate();
-
-	CurrentSessionName = First.SessionDisplayName;
-	CurrentPlayers = First.CurrentPlayers;
-	MaxPlayers = First.MaxPlayers;
 }
 
 void UWBP_NexusOnlineDebug::OnJoinSuccess()
 {
-	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Joined session successfully!"));
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("[DebugWidget] Joined session successfully!"));
-	UpdateSessionInfo();
+	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Join Success!"));
+	
+	// Cache Information for Migration
+	if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld()))
+	{
+		if (FNamedOnlineSession* Active = Session->GetNamedSession(NAME_GameSession))
+		{
+			FString MigrationId;
+			if (Active->SessionSettings.Get(TEXT("MIGRATION_ID_KEY"), MigrationId))
+			{
+				FSessionSettingsData ClientSettings;
+				ClientSettings.SessionType = ENexusSessionType::GameSession;
+				ClientSettings.bAllowHostMigration = true;
+				ClientSettings.MigrationSessionID = MigrationId;
+				
+				// Restore Settings
+				FString DisplayName;
+				if (Active->SessionSettings.Get(TEXT("SESSION_DISPLAY_NAME"), DisplayName))
+				{
+					ClientSettings.SessionName = DisplayName;
+				}
+
+				Active->SessionSettings.Get(TEXT("MAP_NAME_KEY"), ClientSettings.MapName);
+				Active->SessionSettings.Get(TEXT("GAME_MODE_KEY"), ClientSettings.GameMode);
+				ClientSettings.MaxPlayers = Active->SessionSettings.NumPublicConnections;
+
+				if (UGameInstance* GI = GetGameInstance())
+				{
+					if (UNexusMigrationSubsystem* MigSub = GI->GetSubsystem<UNexusMigrationSubsystem>())
+					{
+						MigSub->CacheSessionSettings(ClientSettings);
+						UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Migration Info Cached on Client. Map: %s"), *ClientSettings.MapName);
+					}
+				}
+			}
+		}
+	}
 }
 
 void UWBP_NexusOnlineDebug::OnJoinFailure()
 {
-	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to join session!"));
-	GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red, TEXT("[DebugWidget] Failed to join session!"));
+	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Join Failed!"));
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Join Failed!"));
 }
 
 // ──────────────────────────────────────────────
-// LEAVE / DESTROY SESSION
+// LEAVE
 // ──────────────────────────────────────────────
-
 void UWBP_NexusOnlineDebug::OnLeaveClicked()
 {
-	UAsyncTask_DestroySession* Task = UAsyncTask_DestroySession::DestroySession(GetOwningPlayer(), ENexusSessionType::GameSession);
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UNexusMigrationSubsystem* MigSub = GI->GetSubsystem<UNexusMigrationSubsystem>())
+		{
+			MigSub->SetIntentionalLeave(true);
+		}
+	}
+
+	UAsyncTask_DestroySession* Task = UAsyncTask_DestroySession::DestroySession(this, ENexusSessionType::GameSession);
 	Task->OnSuccess.AddDynamic(this, &UWBP_NexusOnlineDebug::OnLeaveSuccess);
 	Task->OnFailure.AddDynamic(this, &UWBP_NexusOnlineDebug::OnLeaveFailure);
 	Task->Activate();
@@ -172,96 +241,79 @@ void UWBP_NexusOnlineDebug::OnLeaveClicked()
 
 void UWBP_NexusOnlineDebug::OnLeaveSuccess()
 {
-	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] ✅ Session destroyed."));
-	
-	UGameplayStatics::OpenLevel(this, FName("MainMenu"));
-	CurrentSessionName = TEXT("No session");
-	
-	UpdateSessionInfo();
+	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Left session. returning to MainMenu..."));
+	UGameplayStatics::OpenLevel(this, FName(MapName));
 }
 
 void UWBP_NexusOnlineDebug::OnLeaveFailure()
 {
-	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] ❌ Failed to destroy session!"));
+	UE_LOG(LogTemp, Error, TEXT("[DebugWidget] Failed to destroy session locally."));
+	UGameplayStatics::OpenLevel(this, FName(MapName));
 }
 
 // ──────────────────────────────────────────────
-// SESSION INFO DISPLAY
+// DISPLAY & MANAGER BINDING
 // ──────────────────────────────────────────────
 
-void UWBP_NexusOnlineDebug::UpdateSessionInfo()
-{
-	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld());
-	if (Session.IsValid())
-	{
-		if (FNamedOnlineSession* Active = Session->GetNamedSession(NAME_GameSession))
-		{
-			// ────────────────────────────────
-			// Basic session stats
-			// ────────────────────────────────
-			CurrentSessionName = Active->SessionName.ToString();
-
-			const int32 PublicCount = Active->SessionSettings.NumPublicConnections;
-			const int32 OpenCount   = Active->NumOpenPublicConnections;
-
-			CurrentPlayers = PublicCount - OpenCount;
-			MaxPlayers     = PublicCount;
-
-			// ────────────────────────────────
-			// Retrieve Session ID if available
-			// ────────────────────────────────
-			FString SessionId;
-			if (!Active->SessionSettings.Get(TEXT("SESSION_ID_KEY"), SessionId))
-			{
-				SessionId = TEXT("Unknown");
-			}
-			
-			CurrentSessionId = SessionId;
-
-			// ────────────────────────────────
-			// Debug output
-			// ────────────────────────────────
-			UE_LOG(LogTemp, Log,
-				TEXT("[DebugWidget] Session: %s | ID: %s | %d/%d players (%d open slots)"),
-				*CurrentSessionName,
-				*SessionId,
-				CurrentPlayers,
-				MaxPlayers,
-				OpenCount
-			);
-
-			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan,
-				FString::Printf(TEXT("Session: %s\nID: %s\nPlayers: %d/%d"),
-					*CurrentSessionName,
-					*SessionId,
-					CurrentPlayers,
-					MaxPlayers));
-
-			return;
-		}
-	}
-
-	// ────────────────────────────────
-	// No session active
-	// ────────────────────────────────
-	CurrentSessionName = TEXT("No session active");
-	CurrentSessionId = TEXT("N/A");
-	CurrentPlayers = 0;
-	MaxPlayers = 0;
-
-	UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] No active session."));
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, TEXT("[DebugWidget] No active session."));
-}
-
-
-FText UWBP_NexusOnlineDebug::GetSessionInfoText()
+void UWBP_NexusOnlineDebug::TryBindToSessionManager()
 {
 	if (AOnlineSessionManager* Manager = AOnlineSessionManager::Get(this))
 	{
-		return FText::FromString(FString::Printf(TEXT("%s (%d Players) "),*Manager->TrackedSessionName.ToString(), Manager->PlayerCount));
+		if (!Manager->OnPlayerCountChanged.IsAlreadyBound(this, &UWBP_NexusOnlineDebug::OnPlayerCountChanged))
+		{
+			Manager->OnPlayerCountChanged.AddDynamic(this, &UWBP_NexusOnlineDebug::OnPlayerCountChanged);
+		}
+		
+		bIsBoundToManager = true;
+		CachedManager = Manager;
+		UpdateSessionDisplay();
+	}
+}
+
+void UWBP_NexusOnlineDebug::OnPlayerCountChanged(int32 NewCount)
+{
+	UpdateSessionDisplay();
+}
+
+void UWBP_NexusOnlineDebug::UpdateSessionDisplay()
+{
+	FString StatusText = TEXT("Status: Offline / No Session");
+
+	if (AOnlineSessionManager* Manager = AOnlineSessionManager::Get(this))
+	{
+		StatusText = FString::Printf(TEXT("Session: %s | Players: %d"), *Manager->TrackedSessionName.ToString(), Manager->PlayerCount);
+	}
+	else if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld()))
+	{
+		if (FNamedOnlineSession* Active = Session->GetNamedSession(NAME_GameSession))
+		{
+			StatusText = FString::Printf(TEXT("Session: Active | Public: %d | Open: %d"),
+				Active->SessionSettings.NumPublicConnections, Active->NumOpenPublicConnections);
+		}
 	}
 
-	return FText::FromString(TEXT("No session active"));
+	if (Text_SessionInfo)
+		Text_SessionInfo->SetText(FText::FromString(StatusText));
+
+	if (Text_SessionId)
+	{
+		FString SessionIdStr = TEXT("ID: Unknown");
+		if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld()))
+		{
+			FName TargetSessionName = NAME_GameSession;
+			if (AOnlineSessionManager* Manager = AOnlineSessionManager::Get(this))
+			{
+				TargetSessionName = Manager->TrackedSessionName;
+			}
+
+			if (FNamedOnlineSession* Active = Session->GetNamedSession(TargetSessionName))
+			{
+				SessionIdStr = FString::Printf(TEXT("ID: %s"), *Active->GetSessionIdStr());
+			}
+		}
+		
+		Text_SessionId->SetText(FText::FromString(SessionIdStr));
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

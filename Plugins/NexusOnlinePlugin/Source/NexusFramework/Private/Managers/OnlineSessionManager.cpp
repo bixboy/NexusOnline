@@ -9,6 +9,8 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "Utils/NexusOnlineHelpers.h"
+#include "Subsystems/NexusMigrationSubsystem.h"
+
 
 AOnlineSessionManager::AOnlineSessionManager()
 {
@@ -17,35 +19,31 @@ AOnlineSessionManager::AOnlineSessionManager()
     PrimaryActorTick.bCanEverTick = false;
 
     PlayerCount = 0;
-    LastNotifiedPlayerCount = INDEX_NONE;
-    TrackedSessionName = NAME_None;
+    LastNotifiedPlayerCount = 0;
+    TrackedSessionName = NAME_GameSession;
 }
 
 void AOnlineSessionManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    UE_LOG(LogTemp, Log, TEXT("[SessionManager] BeginPlay (Authority: %s)"),
-        HasAuthority() ? TEXT("Server") : TEXT("Client"));
-
     if (HasAuthority())
     {
         BindSessionDelegates();
 
-        // 🔧 IMPORTANT: retarder le premier refresh d’1 tick pour laisser GameState/PlayerState/Session se créer
         GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
         {
             RefreshPlayerCount();
         }));
 
-        // Refresh périodique
-        GetWorldTimerManager().SetTimer(
-            TimerHandle_Refresh, this, &AOnlineSessionManager::RefreshPlayerCount, 5.f, true);
+        GetWorldTimerManager().SetTimer(TimerHandle_Refresh, this, &AOnlineSessionManager::RefreshPlayerCount, 10.f, true);
     }
     else
     {
-        LastNotifiedPlayerCount = PlayerCount;
-        OnRep_PlayerCount();
+        if (PlayerCount > 0)
+        {
+            OnRep_PlayerCount();
+        }
     }
 }
 
@@ -56,24 +54,30 @@ void AOnlineSessionManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
         UnbindSessionDelegates();
         GetWorldTimerManager().ClearTimer(TimerHandle_Refresh);
     }
-
+    
     Super::EndPlay(EndPlayReason);
 }
 
 void AOnlineSessionManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
     DOREPLIFETIME(AOnlineSessionManager, PlayerCount);
     DOREPLIFETIME(AOnlineSessionManager, TrackedSessionName);
+    DOREPLIFETIME(AOnlineSessionManager, NextHostUniqueId);
 }
+
+// ──────────────────────────────────────────────
+// CLIENT UPDATES
+// ──────────────────────────────────────────────
 
 void AOnlineSessionManager::OnRep_PlayerCount()
 {
-    const int32 Previous = (LastNotifiedPlayerCount == INDEX_NONE) ? PlayerCount : LastNotifiedPlayerCount;
-    BroadcastPlayerCountChange(Previous, PlayerCount, true);
-    LastNotifiedPlayerCount = PlayerCount;
+    OnPlayerCountChanged.Broadcast(PlayerCount);
 }
+
+// ──────────────────────────────────────────────
+// SERVER LOGIC
+// ──────────────────────────────────────────────
 
 void AOnlineSessionManager::ForceUpdatePlayerCount()
 {
@@ -81,82 +85,6 @@ void AOnlineSessionManager::ForceUpdatePlayerCount()
     {
         RefreshPlayerCount();
     }
-    else
-    {
-        Server_UpdatePlayerCount();
-    }
-}
-
-void AOnlineSessionManager::Server_UpdatePlayerCount_Implementation()
-{
-    RefreshPlayerCount();
-}
-
-TArray<FString> AOnlineSessionManager::GetPlayerList() const
-{
-    TArray<FString> Players;
-
-    const UWorld* World = GetWorld();
-    if (!World) return Players;
-
-    if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(const_cast<UWorld*>(World)))
-    {
-        const FName EffectiveSessionName = TrackedSessionName.IsNone() ? NAME_GameSession : TrackedSessionName;
-        if (FNamedOnlineSession* NamedSession = Session->GetNamedSession(EffectiveSessionName))
-        {
-            Players.Reserve(NamedSession->RegisteredPlayers.Num());
-            for (const FUniqueNetIdRef& PlayerId : NamedSession->RegisteredPlayers)
-            {
-                // 🔒 Même si FUniqueNetIdRef est un SharedRef (non nul par contrat),
-                // on protège au cas où une entrée corrompue se glisse (OSS exotiques / editor).
-                if (PlayerId.ToSharedPtr())
-                {
-                    Players.Add(PlayerId->ToString());
-                }
-                else
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("[SessionManager] Invalid RegisteredPlayer entry."));
-                }
-            }
-            return Players;
-        }
-    }
-
-    // Fallback côté GameState (Standalone / avant RegisterPlayers)
-    if (const AGameStateBase* GameState = World->GetGameState())
-    {
-        Players.Reserve(GameState->PlayerArray.Num());
-        for (const APlayerState* PS : GameState->PlayerArray)
-        {
-            if (!PS) continue;
-
-            const FUniqueNetIdRepl& IdRepl = PS->GetUniqueId();
-            if (IdRepl.IsValid())
-                Players.Add(IdRepl->ToString());
-            else
-                Players.Add(PS->GetPlayerName());
-        }
-    }
-
-    return Players;
-}
-
-AOnlineSessionManager* AOnlineSessionManager::Get(UObject* WorldContextObject)
-{
-    if (!WorldContextObject)
-        return nullptr;
-
-    UWorld* World = WorldContextObject->GetWorld();
-    if (!World && GEngine)
-        World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull);
-
-    if (!World)
-        return nullptr;
-
-    for (TActorIterator<AOnlineSessionManager> It(World); It; ++It)
-        return *It;
-
-    return nullptr;
 }
 
 void AOnlineSessionManager::RefreshPlayerCount()
@@ -168,131 +96,300 @@ void AOnlineSessionManager::RefreshPlayerCount()
 	if (!World)
 		return;
 
-	int32 NewCount = 0;
-	bool bHasValidSession = false;
+	int32 SessionCount = 0;
+	int32 GameStateCount = 0;
 
+	// 1. Check Session Count
 	if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World))
 	{
-		const FName EffectiveSessionName = TrackedSessionName.IsNone() ? NAME_GameSession : TrackedSessionName;
-		if (FNamedOnlineSession* NamedSession = Session->GetNamedSession(EffectiveSessionName))
+		if (FNamedOnlineSession* NamedSession = Session->GetNamedSession(TrackedSessionName))
 		{
-			bHasValidSession = true;
-			NewCount = NamedSession->RegisteredPlayers.Num();
-
-			if (NewCount == 0 && !World->IsNetMode(NM_Client))
+			SessionCount = NamedSession->RegisteredPlayers.Num();
+			
+			// Auto-register host fix (unchanged)
+			if (SessionCount == 0 && !World->IsNetMode(NM_Client) && !World->IsNetMode(NM_DedicatedServer))
 			{
-				if (IOnlineIdentityPtr Identity = NexusOnline::GetIdentityInterface(World))
-				{
-					if (TSharedPtr<const FUniqueNetId> LocalId = Identity->GetUniquePlayerId(0); LocalId.IsValid())
-					{
-						TArray<FUniqueNetIdRef> Arr;
-						Arr.Add(LocalId.ToSharedRef());
-						Session->RegisterPlayers(EffectiveSessionName, Arr, false);
-						UE_LOG(LogTemp, Log, TEXT("[SessionManager] Auto-register host for active session."));
-					}
-				}
+				 if (IOnlineIdentityPtr Identity = NexusOnline::GetIdentityInterface(World))
+				 {
+					 if (TSharedPtr<const FUniqueNetId> LocalId = Identity->GetUniquePlayerId(0))
+					 {
+						 UE_LOG(LogTemp, Log, TEXT("[SessionManager] Auto-registering host..."));
+						 TArray<FUniqueNetIdRef> Arr;
+						 Arr.Add(LocalId.ToSharedRef());
+						 Session->RegisterPlayers(TrackedSessionName, Arr, false);
+						 return;
+					 }
+				 }
 			}
 		}
 	}
 
-	if (!bHasValidSession)
+	// 2. Check GameState Count
+	if (World->GetGameState())
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("[SessionManager] No active session, PlayerCount forced to 0."));
-		NewCount = 0;
+		GameStateCount = World->GetGameState()->PlayerArray.Num();
 	}
+
+	// 3. Take logic MAX to be safe
+	int32 NewCount = FMath::Max(SessionCount, GameStateCount);
+
+	UE_LOG(LogTemp, Log, TEXT("[SessionManager] Refreshing. Session: %d, GameState: %d -> Final: %d"), SessionCount, GameStateCount, NewCount);
 
 	if (PlayerCount != NewCount)
 	{
-		const int32 Previous = PlayerCount;
 		PlayerCount = NewCount;
-		BroadcastPlayerCountChange(Previous, PlayerCount, false);
-		LastNotifiedPlayerCount = PlayerCount;
+		OnRep_PlayerCount();
 	}
+	
+	UpdateHeir();
 }
 
-
-void AOnlineSessionManager::BroadcastPlayerCountChange(int32 PreviousCount, int32 NewCount, bool bAllowFallbackEvents)
+void AOnlineSessionManager::UpdateHeir()
 {
-    OnPlayerCountChanged.Broadcast(NewCount);
-
-    if (!bAllowFallbackEvents)
+    if (!HasAuthority())
         return;
 
-    if (NewCount > PreviousCount)
+    IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld());
+    if (!Session)
+        return;
+
+    FNamedOnlineSession* NamedSession = Session->GetNamedSession(TrackedSessionName);
+    if (!NamedSession)
+        return;
+
+    // Get Host ID
+    TSharedPtr<const FUniqueNetId> HostId;
+    if (IOnlineIdentityPtr Identity = NexusOnline::GetIdentityInterface(GetWorld()))
     {
-        OnPlayerJoined.Broadcast(TEXT(""));
+        HostId = Identity->GetUniquePlayerId(0);
     }
-    else if (NewCount < PreviousCount)
+
+    FString BestHeirId;
+
+    // Iterate through registered players to find the oldest non-host client
+    // RegisteredPlayers order is usually preservation order of joining? 
+    // If not, we might need a better metric, but for now simple iteration is fine.
+    	// Iterate through registered players to find the oldest non-host client
+	for (const FUniqueNetIdRef& PlayerId : NamedSession->RegisteredPlayers)
+	{
+		// Skip Host
+		if (HostId.IsValid() && *PlayerId == *HostId)
+			continue;
+
+		// Skip invalid
+		if (!PlayerId->IsValid())
+			continue;
+
+		// Found our heir (first valid non-host player)
+		BestHeirId = PlayerId->ToString();
+		UE_LOG(LogTemp, Log, TEXT("[SessionManager] Heir elected via Session: %s"), *BestHeirId);
+		break;
+	}
+
+	// Fallback: Check GameState if Session list didn't yield an heir (common in PIE or broken sessions)
+	if (BestHeirId.IsEmpty() && GetWorld()->GetGameState())
+	{
+		for (APlayerState* PS : GetWorld()->GetGameState()->PlayerArray)
+		{
+			if (!PS) continue;
+			
+			// Skip Local Player (Host)
+			if (PS->GetPlayerController() && PS->GetPlayerController()->IsLocalController())
+				continue;
+
+			// Check ID validity
+			if (PS->GetUniqueId().IsValid())
+			{
+				BestHeirId = PS->GetUniqueId().ToString();
+				UE_LOG(LogTemp, Warning, TEXT("[SessionManager] Heir elected via GameState: %s"), *BestHeirId);
+				break;
+			}
+		}
+	}
+
+    if (NextHostUniqueId != BestHeirId)
     {
-        OnPlayerLeft.Broadcast(TEXT(""));
+        NextHostUniqueId = BestHeirId;
+        
+        // Cache on Server (local)
+        if (UGameInstance* GI = GetGameInstance())
+        {
+             if (UNexusMigrationSubsystem* Subsystem = GI->GetSubsystem<UNexusMigrationSubsystem>())
+             {
+                 Subsystem->SetCachedNextHostId(NextHostUniqueId);
+             }
+        }
     }
 }
+
+void AOnlineSessionManager::OnRep_NextHostUniqueId()
+{
+    // Cache on Client (local)
+    if (UGameInstance* GI = GetGameInstance())
+    {
+         if (UNexusMigrationSubsystem* Subsystem = GI->GetSubsystem<UNexusMigrationSubsystem>())
+         {
+             Subsystem->SetCachedNextHostId(NextHostUniqueId);
+         }
+    }
+}
+
+// ──────────────────────────────────────────────
+// EVENTS & DELEGATES
+// ──────────────────────────────────────────────
 
 void AOnlineSessionManager::BindSessionDelegates()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World))
+    if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld()))
     {
-        RegisterPlayersHandle = Session->AddOnRegisterPlayersCompleteDelegate_Handle(
-            FOnRegisterPlayersCompleteDelegate::CreateUObject(this, &AOnlineSessionManager::OnPlayersRegistered));
+        RegisterPlayersHandle = Session->AddOnRegisterPlayersCompleteDelegate_Handle(FOnRegisterPlayersCompleteDelegate::CreateUObject(this,
+            &AOnlineSessionManager::OnPlayersRegistered));
 
-        UnregisterPlayersHandle = Session->AddOnUnregisterPlayersCompleteDelegate_Handle(
-            FOnUnregisterPlayersCompleteDelegate::CreateUObject(this, &AOnlineSessionManager::OnPlayersUnregistered));
+        UnregisterPlayersHandle = Session->AddOnUnregisterPlayersCompleteDelegate_Handle(FOnUnregisterPlayersCompleteDelegate::CreateUObject(this,
+            &AOnlineSessionManager::OnPlayersUnregistered));
     }
 }
 
 void AOnlineSessionManager::UnbindSessionDelegates()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World))
+    if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld()))
     {
         if (RegisterPlayersHandle.IsValid())
-        {
             Session->ClearOnRegisterPlayersCompleteDelegate_Handle(RegisterPlayersHandle);
-            RegisterPlayersHandle.Reset();
-        }
+        
         if (UnregisterPlayersHandle.IsValid())
-        {
             Session->ClearOnUnregisterPlayersCompleteDelegate_Handle(UnregisterPlayersHandle);
-            UnregisterPlayersHandle.Reset();
-        }
     }
 }
 
 void AOnlineSessionManager::OnPlayersRegistered(FName SessionName, const TArray<FUniqueNetIdRef>& Players, bool bWasSuccessful)
 {
-    if (!HasAuthority()) return;
-
+    if (SessionName != TrackedSessionName)
+        return;
+    
     RefreshPlayerCount();
 
-    if (!bWasSuccessful) return;
-
-    for (const FUniqueNetIdRef& Id : Players)
+    if (bWasSuccessful)
     {
-        if (Id.ToSharedPtr())
-            OnPlayerJoined.Broadcast(Id->ToString());
-        else
-            OnPlayerJoined.Broadcast(TEXT(""));
+        for (const FUniqueNetIdRef& Id : Players)
+        {
+            FString DisplayName = GetPlayerNameFromId(*Id);
+            OnPlayerJoined.Broadcast(DisplayName);
+        }
     }
 }
 
 void AOnlineSessionManager::OnPlayersUnregistered(FName SessionName, const TArray<FUniqueNetIdRef>& Players, bool bWasSuccessful)
 {
-    if (!HasAuthority()) return;
+    if (SessionName != TrackedSessionName)
+        return;
 
     RefreshPlayerCount();
 
-    if (!bWasSuccessful) return;
-
-    for (const FUniqueNetIdRef& Id : Players)
+    if (bWasSuccessful)
     {
-        if (Id.ToSharedPtr())
-            OnPlayerLeft.Broadcast(Id->ToString());
-        else
-            OnPlayerLeft.Broadcast(TEXT(""));
+        for (const FUniqueNetIdRef& Id : Players)
+        {
+             FString DisplayName = GetPlayerNameFromId(*Id);
+             OnPlayerLeft.Broadcast(DisplayName);
+        }
     }
+}
+
+// ──────────────────────────────────────────────
+// UTILS
+// ──────────────────────────────────────────────
+
+TArray<FString> AOnlineSessionManager::GetPlayerList() const
+{
+    TArray<FString> PlayerNames;
+    const UWorld* World = GetWorld();
+    if (!World)
+        return PlayerNames;
+
+    if (const AGameStateBase* GameState = World->GetGameState())
+    {
+        for (APlayerState* PS : GameState->PlayerArray)
+        {
+            if (PS)
+                PlayerNames.Add(PS->GetPlayerName());
+        }
+        
+        if (PlayerNames.Num() > 0)
+            return PlayerNames;
+    }
+
+    if (IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(const_cast<UWorld*>(World)))
+    {
+        if (FNamedOnlineSession* NamedSession = Session->GetNamedSession(TrackedSessionName))
+        {
+            for (const FUniqueNetIdRef& Id : NamedSession->RegisteredPlayers)
+            {
+                PlayerNames.Add(Id->ToString());
+            }
+        }
+    }
+
+    return PlayerNames;
+}
+
+FString AOnlineSessionManager::GetPlayerNameFromId(const FUniqueNetId& PlayerId) const
+{
+    if (const UWorld* World = GetWorld())
+    {
+        if (const AGameStateBase* GameState = World->GetGameState())
+        {
+            for (APlayerState* PS : GameState->PlayerArray)
+            {
+                if (PS && PS->GetUniqueId() == PlayerId)
+                {
+                    return PS->GetPlayerName();
+                }
+            }
+        }
+    }
+    
+    return PlayerId.ToString();
+}
+
+AOnlineSessionManager* AOnlineSessionManager::Get(UObject* WorldContextObject)
+{
+    if (!WorldContextObject)
+        return nullptr;
+    
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World)
+        return nullptr;
+
+    TActorIterator<AOnlineSessionManager> It(World);
+    if (It)
+    {
+        return *It;
+    }
+    
+    return nullptr;
+}
+
+AOnlineSessionManager* AOnlineSessionManager::Spawn(UObject* WorldContextObject, FName InSessionName)
+{
+    if (!WorldContextObject)
+        return nullptr;
+    
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World)
+        return nullptr;
+    
+    if (AOnlineSessionManager* Existing = Get(WorldContextObject))
+        return Existing;
+
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    
+    AOnlineSessionManager* Manager = World->SpawnActor<AOnlineSessionManager>(AOnlineSessionManager::StaticClass(), Params);
+    if (Manager)
+    {
+        Manager->TrackedSessionName = InSessionName;
+    }
+    
+    return Manager;
 }

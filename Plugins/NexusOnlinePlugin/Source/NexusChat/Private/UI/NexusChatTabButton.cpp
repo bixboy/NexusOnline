@@ -1,6 +1,7 @@
 #include "UI/NexusChatTabButton.h"
 #include "UI/NexusChatWindow.h"
 
+
 void UNexusChatTabButton::Init(UNexusChatWindow* Window, FName InChannelName, bool bInIsGeneral)
 {
 	MainWindow = Window;
