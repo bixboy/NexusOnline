@@ -12,23 +12,23 @@
 #define LOCTEXT_NAMESPACE "NexusOnline|CreateSession"
 
 // ──────────────────────────────────────────────
-// Create and configure async node
+// Factory Function
 // ──────────────────────────────────────────────
-UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(UObject* WorldContextObject,
-	const FSessionSettingsData& SettingsData,
-	const TArray<FSessionSearchFilter>& AdditionalSettings,
-	USessionFilterPreset* Preset)
+UAsyncTask_CreateSession* UAsyncTask_CreateSession::CreateSession(UObject* WorldContextObject, const FSessionSettingsData& SettingsData,
+	const TArray<FSessionSearchFilter>& AdditionalSettings, bool bAutoTravel, USessionFilterPreset* Preset)
 {
 	UAsyncTask_CreateSession* Node = NewObject<UAsyncTask_CreateSession>();
 	Node->WorldContextObject = WorldContextObject;
 	Node->Data = SettingsData;
+	Node->bShouldAutoTravel = bAutoTravel;
 	Node->SessionAdditionalSettings = AdditionalSettings;
 	Node->SessionPreset = Preset;
+	
 	return Node;
 }
 
 // ──────────────────────────────────────────────
-// Start the session creation process
+// Entry Point (Activate)
 // ──────────────────────────────────────────────
 void UAsyncTask_CreateSession::Activate()
 {
@@ -40,12 +40,6 @@ void UAsyncTask_CreateSession::Activate()
 	}
 
 	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-	if (!World)
-	{
-		OnFailure.Broadcast();
-		return;
-	}
-
 	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
 	if (!Session.IsValid())
 	{
@@ -56,143 +50,157 @@ void UAsyncTask_CreateSession::Activate()
 
 	const FName InternalSessionName = NexusOnline::SessionTypeToName(Data.SessionType);
 
-	// Destroy existing session
+	// 1. VÉRIFICATION
 	if (Session->GetNamedSession(InternalSessionName))
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[CreateSession] Existing session '%s' found, destroying before recreation."),
-			*InternalSessionName.ToString());
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[CreateSession] Existing session '%s' found. Destroying asynchronously..."), *InternalSessionName.ToString());
 
-		Session->DestroySession(InternalSessionName);
-		FPlatformProcess::Sleep(0.25f);
+		DestroyDelegateHandle = Session->AddOnDestroySessionCompleteDelegate_Handle(FOnDestroySessionCompleteDelegate::CreateUObject(this,
+			&UAsyncTask_CreateSession::OnOldSessionDestroyed));
+
+		if (!Session->DestroySession(InternalSessionName))
+		{
+			Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);
+			OnFailure.Broadcast();
+		}
+		
+		return; 
 	}
 
-	// ──────────────────────────────────────────────
-	// ⚙Configure new session settings
-	// ──────────────────────────────────────────────
+	// 2. Si aucune session n'existe, on passe directement à la création
+	CreateSessionInternal();
+}
+
+// ──────────────────────────────────────────────
+// Step 1.5: Old Session Destroyed
+// ──────────────────────────────────────────────
+void UAsyncTask_CreateSession::OnOldSessionDestroyed(FName SessionName, bool bWasSuccessful)
+{
+	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+	
+	if (Session.IsValid())
+	{
+		Session->ClearOnDestroySessionCompleteDelegate_Handle(DestroyDelegateHandle);
+	}
+
+	if (bWasSuccessful)
+	{
+		UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Old session destroyed. Proceeding to creation."));
+		CreateSessionInternal();
+	}
+	else
+	{
+		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] Failed to destroy old session. Cannot create new one safely."));
+		OnFailure.Broadcast();
+	}
+}
+
+// ──────────────────────────────────────────────
+// Step 2: Internal Creation Logic
+// ──────────────────────────────────────────────
+void UAsyncTask_CreateSession::CreateSessionInternal()
+{
+	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+	if (!Session.IsValid()) 
+	{
+		OnFailure.Broadcast();
+		return;
+	}
+
+	const FName InternalSessionName = NexusOnline::SessionTypeToName(Data.SessionType);
+
+	// --- Configuration des Settings ---
 	FOnlineSessionSettings Settings;
 
-	// Detect NULL subsystem
 	const IOnlineSubsystem* Subsystem = Online::GetSubsystem(World);
 	const bool bIsNullSubsystem = Subsystem && Subsystem->GetSubsystemName() == TEXT("NULL");
 	
 	if (bIsNullSubsystem)
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[CreateSession] 'NULL' subsystem detected. Forcing LAN match, disabling Lobbies, and minimizing packet size."));
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[CreateSession] 'NULL' subsystem detected. Forcing LAN match."));
 	}
 
-	const bool bIsLAN = bIsNullSubsystem ? true : Data.bIsLAN; // Force LAN on NULL
+	const bool bIsLAN = bIsNullSubsystem ? true : Data.bIsLAN;
 	const bool bIsPrivate = Data.bIsPrivate;
 	const bool bFriendsOnly = Data.bFriendsOnly;
 	const int32 MaxPlayers = FMath::Max(1, Data.MaxPlayers);
 
 	Settings.bIsLANMatch = bIsLAN;
 	Settings.bUsesPresence = true;
-	Settings.bUseLobbiesIfAvailable = bIsNullSubsystem ? false : true; // Disable Lobbies on NULL
+	Settings.bUseLobbiesIfAvailable = !bIsNullSubsystem; 
 	Settings.bAllowJoinInProgress = true;
-
 	Settings.NumPublicConnections = bIsPrivate ? 0 : MaxPlayers;
 	Settings.NumPrivateConnections = bIsPrivate ? MaxPlayers : 0;
 
-	// ──────────────────────────────────────────────
-	// Access Type Configuration
-	// ──────────────────────────────────────────────
+	// Access Type
 	if (bFriendsOnly)
 	{
-		Settings.bShouldAdvertise = true;
-		Settings.bAllowJoinViaPresence = true;
-		Settings.bAllowJoinViaPresenceFriendsOnly = true;
-		Settings.bAllowInvites = true;
 		Settings.Set(TEXT("ACCESS_TYPE"), FString("FRIENDS_ONLY"), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+		Settings.bAllowJoinViaPresenceFriendsOnly = true;
 	}
 	else if (bIsPrivate)
 	{
-		Settings.bShouldAdvertise = false;
-		Settings.bAllowJoinViaPresence = false;
-		Settings.bAllowJoinViaPresenceFriendsOnly = false;
-		Settings.bAllowInvites = true;
 		Settings.Set(TEXT("ACCESS_TYPE"), FString("PRIVATE"), EOnlineDataAdvertisementType::ViaOnlineService);
 	}
 	else
 	{
-		Settings.bShouldAdvertise = true;
-		Settings.bAllowJoinViaPresence = true;
-		Settings.bAllowJoinViaPresenceFriendsOnly = false;
-		Settings.bAllowInvites = true;
 		Settings.Set(TEXT("ACCESS_TYPE"), FString("PUBLIC"), EOnlineDataAdvertisementType::ViaOnlineService);
 	}
+	Settings.bShouldAdvertise = !bIsPrivate;
+	Settings.bAllowJoinViaPresence = true;
+	Settings.bAllowInvites = true;
 
-	// ──────────────────────────────────────────────
-	// Metadata
-	// ──────────────────────────────────────────────
-    
-	// Optimisation : Pour le subsystem NULL (LAN), on n'envoie dans le Ping QUE ce qui est nécessaire au filtrage.
-	// Les infos cosmétiques (Map, Mode) ne seront récupérées qu'après le Join pour économiser la bande passante du Beacon.
-	const EOnlineDataAdvertisementType::Type CosmeticAdType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
-    
-	// CRITIQUE : Ces clés sont utilisées par les filtres (FindSessions). Elles DOIVENT être dans le Ping.
-	const EOnlineDataAdvertisementType::Type FilterableAdType = EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
+	// Metadata Optimisation (Ping vs Service)
+	const auto CosmeticType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
+	const auto FilterType = EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
 
-	// Données cosmétiques (peuvent être cachées du ping en LAN pour optimiser)
-	Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, CosmeticAdType);
-	Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, CosmeticAdType);
-	Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, CosmeticAdType);
-	Settings.Set(TEXT("HOST_PLATFORM"), UGameplayStatics::GetPlatformName(), EOnlineDataAdvertisementType::ViaOnlineService); // Pas besoin dans le ping
+	Settings.Set(TEXT("SESSION_DISPLAY_NAME"), Data.SessionName, CosmeticType);
+	Settings.Set(TEXT("MAP_NAME_KEY"), Data.MapName, CosmeticType);
+	Settings.Set(TEXT("GAME_MODE_KEY"), Data.GameMode, CosmeticType);
+	Settings.Set(TEXT("HOST_PLATFORM"), UGameplayStatics::GetPlatformName(), EOnlineDataAdvertisementType::ViaOnlineService);
 
-	// Données de filtrage (OBLIGATOIRES dans le ping)
-	Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), FilterableAdType);
-	Settings.Set(FName("BUILD_VERSION"), 1, FilterableAdType);
-	Settings.Set(NexusOnline::SESSION_KEY_PROJECT_ID_INT, NexusOnline::PROJECT_ID_VALUE_INT, FilterableAdType);
-	Settings.Set(TEXT("SESSION_ID_KEY"), FString(Data.SessionId), FilterableAdType);
+	// Core Data
+	Settings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(Data.SessionType).ToString(), FilterType);
+	Settings.Set(FName("BUILD_VERSION"), 1, FilterType);
+	Settings.Set(NexusOnline::SESSION_KEY_PROJECT_ID_INT, NexusOnline::PROJECT_ID_VALUE_INT, FilterType);
     
-	// Toujours via service uniquement
+	if (Data.SessionId.IsEmpty())
+		Data.SessionId = NexusOnline::GenerateRandomSessionId(Data.SessionIdLength);
+	
+	Settings.Set(TEXT("SESSION_ID_KEY"), FString(Data.SessionId), FilterType);
+	
+	if (!Data.MigrationSessionID.IsEmpty())
+	{
+		Settings.Set(TEXT("MIGRATION_ID_KEY"), Data.MigrationSessionID, FilterType);
+	}
+
 	Settings.Set(TEXT("USES_PRESENCE"), true, EOnlineDataAdvertisementType::ViaOnlineService);
 	
-	// ──────────────────────────────────────────────
-	// Merge user filters and preset filters
-	// ──────────────────────────────────────────────
 	TArray<FSessionSearchFilter> CombinedSettings = SessionAdditionalSettings;
 	if (SessionPreset)
-	{
 		CombinedSettings.Append(SessionPreset->SimpleFilters);
-	}
-
-	if (!CombinedSettings.IsEmpty())
-	{
-		NexusSessionFilterUtils::ApplyFiltersToSettings(CombinedSettings, Settings);
-		UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Applied %d custom session key/value pairs."), CombinedSettings.Num());
-	}
-
-	// ──────────────────────────────
-	// Generate session ID
-	// ──────────────────────────────
-	if (Data.SessionId.IsEmpty())
-	{
-		Data.SessionId = NexusOnline::GenerateRandomSessionId(Data.SessionIdLength);
-	}
-
-	Settings.Set(TEXT("SESSION_ID_KEY"), FString(Data.SessionId), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-
-	// ──────────────────────────────────────────────
-	// Start the session creation
-	// ──────────────────────────────────────────────
-	CreateDelegateHandle = Session->AddOnCreateSessionCompleteDelegate_Handle(
-		FOnCreateSessionCompleteDelegate::CreateUObject(this, &UAsyncTask_CreateSession::OnCreateSessionComplete)
-	);
 	
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Creating session '%s' (MaxPlayers=%d, LAN=%d, Private=%d, ID=%s)"),
-		*InternalSessionName.ToString(), MaxPlayers, bIsLAN, bIsPrivate, *Data.SessionId);
+	if (!CombinedSettings.IsEmpty())
+		NexusSessionFilterUtils::ApplyFiltersToSettings(CombinedSettings, Settings);
+
+	// Launch 
+	CreateDelegateHandle = Session->AddOnCreateSessionCompleteDelegate_Handle(FOnCreateSessionCompleteDelegate::CreateUObject(this,
+		&UAsyncTask_CreateSession::OnCreateSessionComplete));
+	
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Creating session '%s'..."), *InternalSessionName.ToString());
 
 	if (!Session->CreateSession(0, InternalSessionName, Settings))
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] CreateSession() failed immediately!"));
+		Session->ClearOnCreateSessionCompleteDelegate_Handle(CreateDelegateHandle);
 		OnFailure.Broadcast();
 	}
 }
 
 // ──────────────────────────────────────────────
-// OnCreateSessionComplete
+// Step 3: Completion
 // ──────────────────────────────────────────────
-
 void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool bWasSuccessful)
 {
 	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
@@ -210,24 +218,23 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
 
 	if (!bWasSuccessful)
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] Session creation failed (%s)."), *SessionName.ToString());
+		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] Failed to create session."));
 		OnFailure.Broadcast();
 		return;
 	}
 
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] ✅ Session '%s' created successfully."), *SessionName.ToString());
-    
 	if (Session.IsValid())
 	{
 		Session->StartSession(SessionName);
 	}
 
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Success. AutoTravel = %s"), bShouldAutoTravel ? TEXT("TRUE") : TEXT("FALSE"));
+	
 	OnSuccess.Broadcast();
 
-	if (World)
+	if (bShouldAutoTravel && World && !Data.MapName.IsEmpty())
 	{
 		UGameplayStatics::OpenLevel(World, FName(*Data.MapName), true, TEXT("listen"));
 	}
 }
-
 #undef LOCTEXT_NAMESPACE

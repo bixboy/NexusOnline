@@ -4,21 +4,22 @@
 #include "OnlineSubsystemUtils.h"
 #include "Types/OnlineSessionData.h"
 
+
 namespace NexusOnline
 {
+	//───────────────────────────────────────────────
+	// Constants (Optimized)
+	//───────────────────────────────────────────────
+	inline const FName SESSION_KEY_PROJECT_ID_INT = FName("ProjectID");
+	inline const int32 PROJECT_ID_VALUE_INT = 888888;
 
 	//───────────────────────────────────────────────
-	// 🔹 Constants
+	// ID Generator
 	//───────────────────────────────────────────────
-	static const FName SESSION_KEY_PROJECT_ID_INT = FName("ProjectID");
-	static const int32 PROJECT_ID_VALUE_INT = 888888;
-
-	//───────────────────────────────────────────────
-	// 🔹 ID Generator
-	//───────────────────────────────────────────────
-	static FString GenerateRandomSessionId(int32 Length)
+	static FORCEINLINE FString GenerateRandomSessionId(int32 Length)
 	{
 		static const FString Charset = TEXT("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+		
 		FString Result;
 		Result.Reserve(Length);
 		for (int32 i = 0; i < Length; ++i)
@@ -29,74 +30,101 @@ namespace NexusOnline
 		
 		return Result;
 	}
-
 	
 	//───────────────────────────────────────────────
-	// 🔹 ENUM ↔ NAME Conversion
+	// ENUM ↔ NAME Conversion
 	//───────────────────────────────────────────────
 	static FORCEINLINE FName SessionTypeToName(ENexusSessionType Type)
 	{
 		switch (Type)
 		{
-		case ENexusSessionType::PartySession: return FName("PartySession");
-		case ENexusSessionType::SpectatorSession: return FName("SpectatorSession");
-		case ENexusSessionType::CustomSession: return FName("CustomSession");
-		default: return FName("GameSession");
+		case ENexusSessionType::GameSession:
+			return NAME_GameSession;
+			
+		case ENexusSessionType::PartySession:
+			return NAME_PartySession;
+			
+		case ENexusSessionType::SpectatorSession:
+			return FName(TEXT("SpectatorSession"));
+			
+		case ENexusSessionType::CustomSession:
+			return FName(TEXT("CustomSession"));
+			
+		default: 
+				return NAME_GameSession;
 		}
 	}
 
 	static FORCEINLINE ENexusSessionType NameToSessionType(const FName& Name)
 	{
-		if (Name == "PartySession") return ENexusSessionType::PartySession;
-		if (Name == "SpectatorSession") return ENexusSessionType::SpectatorSession;
-		if (Name == "CustomSession") return ENexusSessionType::CustomSession;
+		if (Name == NAME_PartySession)
+			return ENexusSessionType::PartySession;
+		
+		if (Name == FName(TEXT("SpectatorSession")))
+			return ENexusSessionType::SpectatorSession;
+		
+		if (Name == FName(TEXT("CustomSession")))
+			return ENexusSessionType::CustomSession;
+		
 		return ENexusSessionType::GameSession;
 	}
 
 	//───────────────────────────────────────────────
-	// 🔹 Subsystem Access Helpers
+	// Subsystem Access Helpers
 	//───────────────────────────────────────────────
-	static FORCEINLINE IOnlineSubsystem* GetSubsystem(UWorld* World)
+	static FORCEINLINE IOnlineSubsystem* GetSubsystem(UObject* WorldContextObject)
 	{
-		return Online::GetSubsystem(World);
+		if (!WorldContextObject)
+			return nullptr;
+		
+		UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull);
+		return World ? Online::GetSubsystem(World) : nullptr;
 	}
 
-	static FORCEINLINE bool IsSubsystemAvailable(UWorld* World)
+	static FORCEINLINE bool IsSubsystemAvailable(UObject* WorldContextObject)
 	{
-		return (GetSubsystem(World) != nullptr);
+		return (GetSubsystem(WorldContextObject) != nullptr);
 	}
 
 	//───────────────────────────────────────────────
-	// 🔹 Interface Accessors
+	// Interface Accessors
 	//───────────────────────────────────────────────
-	static FORCEINLINE IOnlineSessionPtr GetSessionInterface(UWorld* World)
+	static FORCEINLINE IOnlineSessionPtr GetSessionInterface(UObject* WorldContextObject)
 	{
-		if (IOnlineSubsystem* Subsystem = GetSubsystem(World))
+		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetSessionInterface();
 		
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlineIdentityPtr GetIdentityInterface(UWorld* World)
+	static FORCEINLINE IOnlineIdentityPtr GetIdentityInterface(UObject* WorldContextObject)
 	{
-		if (IOnlineSubsystem* Subsystem = GetSubsystem(World))
+		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetIdentityInterface();
 		
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlineFriendsPtr GetFriendsInterface(UWorld* World)
+	static FORCEINLINE IOnlineFriendsPtr GetFriendsInterface(UObject* WorldContextObject)
 	{
-		if (IOnlineSubsystem* Subsystem = GetSubsystem(World))
+		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetFriendsInterface();
 		
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlineExternalUIPtr GetExternalUIInterface(UWorld* World)
+	static FORCEINLINE IOnlineExternalUIPtr GetExternalUIInterface(UObject* WorldContextObject)
 	{
-		if (IOnlineSubsystem* Subsystem = GetSubsystem(World))
+		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetExternalUIInterface();
+		
+		return nullptr;
+	}
+
+	static FORCEINLINE IOnlinePresencePtr GetPresenceInterface(UObject* WorldContextObject)
+	{
+		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
+			return Subsystem->GetPresenceInterface();
 		
 		return nullptr;
 	}

@@ -11,10 +11,7 @@ struct FSessionSearchFilter;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindSessionsCompleted, bool, bWasSuccessful, const TArray<FOnlineSessionSearchResultData>&, Results);
 
-/**
- * Asynchronous Blueprint node to find online sessions.
- * Supports advanced filtering, sorting, and presets.
- */
+
 UCLASS()
 class NEXUSFRAMEWORK_API UAsyncTask_FindSessions : public UBlueprintAsyncActionBase
 {
@@ -28,10 +25,6 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Nexus|Online|Session")
 	FOnFindSessionsCompleted OnCompleted;
 
-	// ───────────────────────────────
-	// Factory Method
-	// ───────────────────────────────
-
 	/**
 	 * Creates a Find session async node.
 	 * @param WorldContextObject Reference to the world or player calling this async node.
@@ -39,6 +32,8 @@ public:
 	 * @param SessionType Type of session to search for (e.g. GameSession, Lobby, PartySession).
 	 * .
 	 * @param MaxResults Maximum number of results to return from the search.
+	 * .
+	 * @param bIsLANQuery Search only LAN sessions.
 	 * .
 	 * @param SimpleFilters Basic filters (key/value pairs) applied directly to query settings.
 	 * .
@@ -49,15 +44,9 @@ public:
 	 * @param Preset Optional preset combining reusable filter and sort configurations.
 	 */
 	UFUNCTION(BlueprintCallable, meta=(BlueprintInternalUseOnly="true", WorldContext="WorldContextObject", AutoCreateRefTerm="SimpleFilters,AdvancedRules,SortRules"), Category="Nexus|Online|Session")
-	static UAsyncTask_FindSessions* FindSessions(
-		UObject* WorldContextObject,
-		ENexusSessionType SessionType,
-		int32 MaxResults,
-		bool bIsLANQuery,
-		const TArray<FSessionSearchFilter>& SimpleFilters,
-		const TArray<USessionFilterRule*>& AdvancedRules,
-		const TArray<USessionSortRule*>& SortRules,
-		USessionFilterPreset* Preset
+	static UAsyncTask_FindSessions* FindSessions(UObject* WorldContextObject, ENexusSessionType SessionType, int32 MaxResults, bool bIsLANQuery,
+		const TArray<FSessionSearchFilter>& SimpleFilters, const TArray<USessionFilterRule*>& AdvancedRules,
+		const TArray<USessionSortRule*>& SortRules, USessionFilterPreset* Preset
 	);
 
 	virtual void Activate() override;

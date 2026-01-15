@@ -9,10 +9,6 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSessionCreated);
 
-
-/**
- * Asynchronous Blueprint node that creates a new online session.
- */
 UCLASS()
 class NEXUSFRAMEWORK_API UAsyncTask_CreateSession : public UBlueprintAsyncActionBase
 {
@@ -27,37 +23,44 @@ public:
 	FOnSessionCreated OnFailure;
 	
 	/**
-	 * Creates a new session asynchronously.
+	 * Crée une session multijoueur.
 	 *
-	 * @param WorldContextObject   World or PlayerController context.
-	 * @param SettingsData         Configuration for the session (map, name, max players, etc.).
-	 * @param AdditionalSettings   Optional extra session filters/metadata (key/value pairs).
-	 * @param Preset               Optional preset that merges reusable filters and sort rules.
+	 * @param SettingsData         Configuration de base (Map, MaxPlayers, Mode, etc.).
+	 * @param AdditionalSettings   Filtres ou métadonnées supplémentaires.
+	 * @param bAutoTravel          Si VRAI, effectue un ServerTravel vers la map dès la création. Si FAUX, appelle juste OnSuccess
+	 * @param Preset               Preset de filtres optionnel.
 	 */
 	UFUNCTION(BlueprintCallable, meta=(BlueprintInternalUseOnly="true", WorldContext="WorldContextObject", AutoCreateRefTerm="AdditionalSettings"), Category="Nexus|Online|Session")
-	static UAsyncTask_CreateSession* CreateSession(UObject* WorldContextObject,
-		const FSessionSettingsData& SettingsData,
-		const TArray<FSessionSearchFilter>& AdditionalSettings,
-		USessionFilterPreset* Preset
+	static UAsyncTask_CreateSession* CreateSession(
+	   UObject* WorldContextObject, 
+	   const FSessionSettingsData& SettingsData,
+	   const TArray<FSessionSearchFilter>& AdditionalSettings,
+	   bool bAutoTravel = true, 
+	   USessionFilterPreset* Preset = nullptr
 	);
 
 	virtual void Activate() override;
 
 private:
+	
+	/** Étape 1 : Callback appelé quand l'ancienne session est bien détruite */
+	void OnOldSessionDestroyed(FName SessionName, bool bWasSuccessful);
 
-	// ───────────────────────────────
-	// Internal Callback
-	// ───────────────────────────────
+	/** Étape 2 : Lance la vraie création */
+	void CreateSessionInternal();
+
+	/** Étape 3 : Fin du processus */
 	void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
 
 	
 	// ───────────────────────────────
-	// Internal Data
+	// Données
 	// ───────────────────────────────
 	UPROPERTY()
 	UObject* WorldContextObject = nullptr;
 	
 	FSessionSettingsData Data;
+	bool bShouldAutoTravel = true;
 
 	UPROPERTY()
 	TArray<FSessionSearchFilter> SessionAdditionalSettings;
@@ -66,4 +69,5 @@ private:
 	TObjectPtr<USessionFilterPreset> SessionPreset;
 
 	FDelegateHandle CreateDelegateHandle;
+	FDelegateHandle DestroyDelegateHandle;
 };

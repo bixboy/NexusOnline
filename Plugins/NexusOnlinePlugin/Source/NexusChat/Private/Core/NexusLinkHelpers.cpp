@@ -1,15 +1,19 @@
 #include "Core/NexusLinkHelpers.h"
 #include "Internationalization/Regex.h"
 
+
 FString UNexusLinkHelpers::MakeLink(const FString& Type, const FString& Data, const FString& DisplayText)
 {
-	FString SafeData = Data.Replace(TEXT("\""), TEXT("&quot;"));
+	FString SafeData = Data.Replace(TEXT("&"), TEXT("&amp;"));
+	SafeData = SafeData.Replace(TEXT("\""), TEXT("&quot;"));
+
 	return FString::Printf(TEXT("<link type=\"%s\" data=\"%s\">%s</>"), *Type, *SafeData, *DisplayText);
 }
 
 FString UNexusLinkHelpers::MakePlayerLink(const FString& PlayerName, int32 MaxDisplayLength)
 {
 	FString DisplayName = PlayerName;
+	
 	if (MaxDisplayLength > 0 && DisplayName.Len() > MaxDisplayLength)
 	{
 		DisplayName = DisplayName.Left(MaxDisplayLength) + TEXT("...");
@@ -26,18 +30,11 @@ FString UNexusLinkHelpers::MakeUrlLink(const FString& Url, const FString& Displa
 
 FString UNexusLinkHelpers::AutoFormatUrls(const FString& Text)
 {
-	// Don't process if text already contains link tags
-	if (Text.Contains(TEXT("<link")))
-	{
-		return Text;
-	}
-
-	// Regex pattern to match URLs (http:// or https://)
-	const FRegexPattern UrlPattern(TEXT("(https?://[^\\s<>\"]+)"));
+	const FRegexPattern UrlPattern(TEXT("(https?://[^\\s<>\\\"]+)"));
 	FRegexMatcher Matcher(UrlPattern, Text);
 
 	FString Result = Text;
-	int32 Offset = 0; // Track position offset as we insert longer strings
+	int32 Offset = 0;
 
 	while (Matcher.FindNext())
 	{
@@ -45,7 +42,6 @@ FString UNexusLinkHelpers::AutoFormatUrls(const FString& Text)
 		const int32 MatchEnd = Matcher.GetMatchEnding();
 		const FString Url = Text.Mid(MatchStart, MatchEnd - MatchStart);
 		
-		// Skip if URL appears to be inside a data attribute
 		const FString Before = Text.Left(MatchStart);
 		if (Before.EndsWith(TEXT("data=\"")))
 		{
@@ -63,17 +59,21 @@ FString UNexusLinkHelpers::AutoFormatUrls(const FString& Text)
 	return Result;
 }
 
+// ────────────────────────────────────────────
+// HELPERS CUSTOM RAPIDES
+// ────────────────────────────────────────────
+
 FString UNexusLinkHelpers::MakeItemLink(const FString& ItemId, const FString& ItemName)
 {
-	return MakeLink(TEXT("item"), ItemId, ItemName);
+	return MakeLink(TEXT("item"), ItemId, FString::Printf(TEXT("[%s]"), *ItemName));
 }
 
 FString UNexusLinkHelpers::MakeQuestLink(const FString& QuestId, const FString& QuestName)
 {
-	return MakeLink(TEXT("quest"), QuestId, QuestName);
+	return MakeLink(TEXT("quest"), QuestId, FString::Printf(TEXT("{Quête: %s}"), *QuestName));
 }
 
 FString UNexusLinkHelpers::MakeLocationLink(const FString& LocationId, const FString& LocationName)
 {
-	return MakeLink(TEXT("location"), LocationId, LocationName);
+	return MakeLink(TEXT("gps"), LocationId, FString::Printf(TEXT("%s"), *LocationName));
 }

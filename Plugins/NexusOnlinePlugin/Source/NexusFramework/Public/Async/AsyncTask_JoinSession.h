@@ -1,5 +1,4 @@
 ﻿#pragma once
-
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Types/OnlineSessionData.h"
@@ -10,9 +9,7 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJoinSessionSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJoinSessionFailure);
 
-/**
- * Asynchronous Blueprint node to join an online session.
- */
+
 UCLASS()
 class NEXUSFRAMEWORK_API UAsyncTask_JoinSession : public UBlueprintAsyncActionBase
 {
@@ -26,34 +23,26 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Nexus|Online|Session")
 	FOnJoinSessionFailure OnFailure;
 
-	// ───────────────────────────────
-	// Factory Method
-	// ───────────────────────────────
-	
 	/**
-	 * Creates a join session async node.
-	 * @param WorldContextObject World or PlayerController context.
-	 * @param SessionResult Result data from FindSessions (contains raw session info).
-	 * @param SessionType Type of session (GameSession, PartySession, etc.).
+	 * Tente de rejoindre une session trouvée.
+	 * * @param SessionResult Le résultat brut obtenu via FindSessions.
+	 * @param bAutoTravel Si VRAI, lance le ClientTravel automatiquement vers le serveur.
+	 * @param SessionType Le type de session interne (GameSession généralement).
 	 */
 	UFUNCTION(BlueprintCallable, meta=(BlueprintInternalUseOnly="true", WorldContext="WorldContextObject"), Category="Nexus|Online|Session")
-	static UAsyncTask_JoinSession* JoinSession(UObject* WorldContextObject,
-		const FOnlineSessionSearchResultData& SessionResult,
-		ENexusSessionType SessionType = ENexusSessionType::GameSession
-	);
+	static UAsyncTask_JoinSession* JoinSession(UObject* WorldContextObject, const FOnlineSessionSearchResultData& SessionResult, bool bAutoTravel = true,
+		ENexusSessionType SessionType = ENexusSessionType::GameSession);
 
 	virtual void Activate() override;
 
 private:
+	
+	void OnOldSessionDestroyed(FName SessionName, bool bWasSuccessful);
 
-	// ───────────────────────────────
-	// Internal Callbacks
-	// ───────────────────────────────
+	void JoinSessionInternal();
+
 	void OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
-
-	// ───────────────────────────────
-	// Internal Data
-	// ───────────────────────────────
+	
 	
 	UPROPERTY()
 	UObject* WorldContextObject = nullptr;
@@ -61,6 +50,9 @@ private:
 	FOnlineSessionSearchResult RawResult;
 	
 	ENexusSessionType DesiredType = ENexusSessionType::GameSession;
+	
+	bool bShouldAutoTravel = true;
 
 	FDelegateHandle JoinDelegateHandle;
+	FDelegateHandle DestroyDelegateHandle;
 };

@@ -3,16 +3,14 @@
 #include "Components/RichTextBlock.h"
 #include "Framework/Text/SlateHyperlinkRun.h"
 #include "Styling/SlateTypes.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
 
-/**
- * Internal Slate decorator that handles <link> tag parsing and rendering.
- * Creates clickable hyperlinks with custom styling.
- */
+
 class FNexusLinkTextDecorator : public ITextDecorator
 {
 public:
-	FNexusLinkTextDecorator(UNexusLinkDecorator* InOwner)
-		: Owner(InOwner)
+	FNexusLinkTextDecorator(UNexusLinkDecorator* InOwner, URichTextBlock* InWidgetOwner) : Owner(InOwner), WidgetOwner(InWidgetOwner)
 	{
 	}
 
@@ -21,25 +19,21 @@ public:
 		return RunParseResult.Name == TEXT("link");
 	}
 
-	virtual TSharedRef<ISlateRun> Create(
-		const TSharedRef<class FTextLayout>& TextLayout,
-		const FTextRunParseResults& RunParseResult,
-		const FString& OriginalText,
-		const TSharedRef<FString>& InOutModelText,
-		const ISlateStyle* Style) override
+	virtual TSharedRef<ISlateRun> Create(const TSharedRef<FTextLayout>& TextLayout, const FTextRunParseResults& RunParseResult, const FString& OriginalText,
+		const TSharedRef<FString>& InOutModelText, const ISlateStyle* Style) override
 	{
-		// Extract display text (content between <link> and </>)
+		// ──────────────────────────────────────────────
+		// 1. Extraction des données (Parse)
+		// ──────────────────────────────────────────────
 		const FTextRange& ContentRange = RunParseResult.ContentRange;
 		FString DisplayText = OriginalText.Mid(ContentRange.BeginIndex, ContentRange.EndIndex - ContentRange.BeginIndex);
 
-		// Extract "type" attribute
 		FString LinkType;
 		if (const FTextRange* TypeAttr = RunParseResult.MetaData.Find(TEXT("type")))
 		{
 			LinkType = OriginalText.Mid(TypeAttr->BeginIndex, TypeAttr->EndIndex - TypeAttr->BeginIndex);
 		}
 
-		// Extract "data" attribute
 		FString LinkData;
 		if (const FTextRange* DataAttr = RunParseResult.MetaData.Find(TEXT("data")))
 		{
@@ -47,36 +41,38 @@ public:
 			LinkData = LinkData.Replace(TEXT("&quot;"), TEXT("\""));
 		}
 
-		// Build model text range
+		// ──────────────────────────────────────────────
+		// 2. Construction du Modèle
+		// ──────────────────────────────────────────────
 		const int32 StartIndex = InOutModelText->Len();
 		InOutModelText->Append(DisplayText);
 		FTextRange ModelRange(StartIndex, InOutModelText->Len());
 
-		// Build run info with metadata
-		FRunInfo RunInfo(RunParseResult.Name);
-		for (const TPair<FString, FTextRange>& Pair : RunParseResult.MetaData)
-		{
-			RunInfo.MetaData.Add(Pair.Key, OriginalText.Mid(Pair.Value.BeginIndex, Pair.Value.EndIndex - Pair.Value.BeginIndex));
-		}
-
-		// Configure hyperlink style (light blue)
-		FTextBlockStyle TextStyle = FTextBlockStyle::GetDefault();
-		TextStyle.SetColorAndOpacity(FSlateColor(FLinearColor(0.3f, 0.7f, 1.0f)));
+		// ──────────────────────────────────────────────
+		// 3. Styling (Couleurs & Hover)
+		// ──────────────────────────────────────────────
 		
+		FTextBlockStyle TextStyle = WidgetOwner.IsValid() ? WidgetOwner->GetDefaultTextStyle() : FTextBlockStyle::GetDefault();
+		TextStyle.SetColorAndOpacity(FSlateColor(FLinearColor(0.2f, 0.6f, 1.0f)));
+
 		FHyperlinkStyle HyperlinkStyle;
 		HyperlinkStyle.SetTextStyle(TextStyle);
 
-		// Create hyperlink with click handler
+		// ──────────────────────────────────────────────
+		// 4. Création du Run Interactif
+		// ──────────────────────────────────────────────
 		UNexusLinkDecorator* OwnerPtr = Owner;
+		TWeakObjectPtr<URichTextBlock> WeakWidget = WidgetOwner;
+
 		return FSlateHyperlinkRun::Create(
-			RunInfo,
+			FRunInfo(RunParseResult.Name),
 			InOutModelText,
 			HyperlinkStyle,
-			FSlateHyperlinkRun::FOnClick::CreateLambda([OwnerPtr, LinkType, LinkData](const FSlateHyperlinkRun::FMetadata&)
+			FSlateHyperlinkRun::FOnClick::CreateLambda([OwnerPtr, WeakWidget, LinkType, LinkData](const FSlateHyperlinkRun::FMetadata&)
 			{
 				if (OwnerPtr)
 				{
-					OwnerPtr->HandleLinkClick(LinkType, LinkData);
+					OwnerPtr->HandleLinkClick(WeakWidget.Get(), LinkType, LinkData);
 				}
 			}),
 			FSlateHyperlinkRun::FOnGenerateTooltip(),
@@ -87,23 +83,36 @@ public:
 
 private:
 	UNexusLinkDecorator* Owner;
+	TWeakObjectPtr<URichTextBlock> WidgetOwner;
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
+// IMPLEMENTATION DE LA CLASSE UOBJECT
+// ──────────────────────────────────────────────────────────────────────────────
 
-UNexusLinkDecorator::UNexusLinkDecorator(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
+UNexusLinkDecorator::UNexusLinkDecorator(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
 }
 
 TSharedPtr<ITextDecorator> UNexusLinkDecorator::CreateDecorator(URichTextBlock* InOwner)
 {
-	return MakeShared<FNexusLinkTextDecorator>(this);
+	return MakeShared<FNexusLinkTextDecorator>(this, InOwner);
 }
 
-void UNexusLinkDecorator::HandleLinkClick(const FString& LinkType, const FString& LinkData)
+void UNexusLinkDecorator::HandleLinkClick(URichTextBlock* ContextWidget, const FString& LinkType, const FString& LinkData)
 {
-	if (UWorld* World = GEngine->GetCurrentPlayWorld())
+	UWorld* World = nullptr;
+	if (ContextWidget)
+	{
+		World = ContextWidget->GetWorld();
+	}
+	
+	if (!World)
+	{
+		World = GEngine->GetCurrentPlayWorld();
+	}
+
+	if (World)
 	{
 		if (UNexusChatSubsystem* ChatSubsystem = World->GetSubsystem<UNexusChatSubsystem>())
 		{

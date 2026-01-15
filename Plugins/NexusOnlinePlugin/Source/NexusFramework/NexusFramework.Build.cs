@@ -16,13 +16,15 @@ public class NexusFramework : ModuleRules
 		    "OnlineSubsystemSteam",
 		    "UMG",
 		    "Slate",
-		    "SlateCore"
+		    "SlateCore",
+		    "CoreOnline"
 	    });
 
 	    PrivateDependencyModuleNames.AddRange(new string[]
 	    {
 		    "Slate",
-		    "SlateCore"
+		    "SlateCore",
+            "DeveloperSettings"
 	    });
 
 	    PublicIncludePaths.AddRange(new string[]

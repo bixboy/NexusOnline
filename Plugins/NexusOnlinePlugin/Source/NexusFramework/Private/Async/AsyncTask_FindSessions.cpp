@@ -10,33 +10,26 @@
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "OnlineSessionSettings.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/LocalPlayer.h"
 
 #define LOCTEXT_NAMESPACE "NexusOnline|FindSessions"
 
 // ──────────────────────────────────────────────
-// Create and configure node
+// Factory : Configuration du Nœud
 // ──────────────────────────────────────────────
-UAsyncTask_FindSessions* UAsyncTask_FindSessions::FindSessions(
-	UObject* WorldContextObject,
-	ENexusSessionType SessionType,
-	int32 MaxResults,
-	bool bIsLANQuery,
-	const TArray<FSessionSearchFilter>& SimpleFilters,
-	const TArray<USessionFilterRule*>& AdvancedRules,
-	const TArray<USessionSortRule*>& SortRules,
-	USessionFilterPreset* Preset
-	)
+UAsyncTask_FindSessions* UAsyncTask_FindSessions::FindSessions(UObject* WorldContextObject, ENexusSessionType SessionType, int32 MaxResults, bool bIsLANQuery,
+	const TArray<FSessionSearchFilter>& SimpleFilters, const TArray<USessionFilterRule*>& AdvancedRules,
+	const TArray<USessionSortRule*>& SortRules, USessionFilterPreset* Preset)
 {
 	UAsyncTask_FindSessions* Node = NewObject<UAsyncTask_FindSessions>();
 	Node->WorldContextObject = WorldContextObject;
 	Node->DesiredType = SessionType;
-
-	// Configure online search
+	
 	Node->SearchSettings = MakeShareable(new FOnlineSessionSearch());
-	Node->SearchSettings->MaxSearchResults = MaxResults;
+	Node->SearchSettings->MaxSearchResults = (MaxResults > 0) ? MaxResults : 50;
+	
 	Node->SearchSettings->bIsLanQuery = bIsLANQuery;
-
-	// Store user-defined configuration
 	Node->UserSimpleFilters = SimpleFilters;
 	Node->UserPreset = Preset;
 
@@ -56,276 +49,229 @@ UAsyncTask_FindSessions* UAsyncTask_FindSessions::FindSessions(
 }
 
 // ──────────────────────────────────────────────
-// Activate : Start the async session search
+// Activate : Lancement de la recherche
 // ──────────────────────────────────────────────
 void UAsyncTask_FindSessions::Activate()
 {
-if (!WorldContextObject)
-    {
-       UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] Invalid WorldContextObject."));
-       OnCompleted.Broadcast(false, {});
-       return;
-    }
+	if (!WorldContextObject)
+	{
+		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] Invalid WorldContextObject."));
+		OnCompleted.Broadcast(false, {});
+		return;
+	}
 
-    UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-    if (!World)
-    {
-       OnCompleted.Broadcast(false, {});
-       return;
-    }
-
-    // ──────────────────────────────────────────────
-    // 1. Récupération du PlayerController (Ta demande)
-    // ──────────────────────────────────────────────
-    APlayerController* PC = World->GetFirstPlayerController();
-    if (!PC)
-    {
-        UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] No PlayerController found."));
-        OnCompleted.Broadcast(false, {});
-        return;
-    }
-
-    // On récupère l'ID Unique du joueur local (Nécessaire pour Steam/EOS)
-    FUniqueNetIdRepl PlayerID;
-    if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
-    {
-        PlayerID = LocalPlayer->GetPreferredUniqueNetId();
-    }
-    else
-    {
-        UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] PlayerController has no LocalPlayer."));
-        OnCompleted.Broadcast(false, {});
-        return;
-    }
-
-    if (!PlayerID.IsValid())
-    {
-        UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] Invalid Player UniqueNetId."));
-        OnCompleted.Broadcast(false, {});
-        return;
-    }
-
-    // ──────────────────────────────────────────────
-    // 2. Configuration Subsystem
-    // ──────────────────────────────────────────────
-    RebuildResolvedFilters();
-
-    IOnlineSubsystem* Subsystem = Online::GetSubsystem(World);
-    if (!Subsystem)
-    {
-       UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] No valid OnlineSubsystem."));
-       OnCompleted.Broadcast(false, {});
-       return;
-    }
-
-    const FName SubsystemName = Subsystem->GetSubsystemName();
-    UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Using Subsystem: %s"), *SubsystemName.ToString());
-
-    // AUTO-FIX: NULL Subsystem only supports LAN
-    if (SubsystemName == TEXT("NULL") && !SearchSettings->bIsLanQuery)
-    {
-        UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] 'NULL' subsystem detected but bIsLanQuery is FALSE. Forcing LAN query."));
-        SearchSettings->bIsLanQuery = true;
-    }
-
-    IOnlineSessionPtr Session = Subsystem->GetSessionInterface();
-    if (!Session.IsValid())
-    {
-       UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] Invalid Session Interface."));
-       OnCompleted.Broadcast(false, {});
-       return;
-    }
-
-    ApplyQueryFilters();
-
-    FindSessionsHandle = Session->AddOnFindSessionsCompleteDelegate_Handle
-    (
-       FOnFindSessionsCompleteDelegate::CreateUObject(this, &UAsyncTask_FindSessions::OnFindSessionsComplete)
-    );
-
-    UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Searching sessions of type '%s' (Max: %d, LAN: %d)"),
-       *NexusOnline::SessionTypeToName(DesiredType).ToString(),
-       SearchSettings->MaxSearchResults,
-       SearchSettings->bIsLanQuery);
-	
-    Session->FindSessions(*PlayerID, SearchSettings.ToSharedRef());
-}
-
-// ──────────────────────────────────────────────
-// Callback : Session search complete
-// ──────────────────────────────────────────────
-void UAsyncTask_FindSessions::OnFindSessionsComplete(bool bWasSuccessful)
-{
 	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
-	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+	if (!World)
+	{
+		OnCompleted.Broadcast(false, {});
+		return;
+	}
 
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC)
+	{
+		OnCompleted.Broadcast(false, {});
+		return;
+	}
+
+	FUniqueNetIdRepl PlayerID;
+	if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+	{
+		PlayerID = LocalPlayer->GetPreferredUniqueNetId();
+	}
+
+	if (!PlayerID.IsValid())
+	{
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] Invalid Player UniqueNetId. Proceeding, but Steam/EOS might fail."));
+	}
+
+	RebuildResolvedFilters();
+
+	IOnlineSubsystem* Subsystem = Online::GetSubsystem(World);
+	if (!Subsystem)
+	{
+		OnCompleted.Broadcast(false, {});
+		return;
+	}
+
+	const FName SubsystemName = Subsystem->GetSubsystemName();
+	if (SubsystemName == TEXT("NULL") && !SearchSettings->bIsLanQuery)
+	{
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] 'NULL' subsystem detected. Forcing LAN query."));
+		SearchSettings->bIsLanQuery = true;
+	}
+
+	IOnlineSessionPtr Session = Subsystem->GetSessionInterface();
 	if (!Session.IsValid())
 	{
 		OnCompleted.Broadcast(false, {});
 		return;
 	}
 
-	Session->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsHandle);
+	ApplyQueryFilters();
+
+	FindSessionsHandle = Session->AddOnFindSessionsCompleteDelegate_Handle
+	(
+		FOnFindSessionsCompleteDelegate::CreateUObject(this, &UAsyncTask_FindSessions::OnFindSessionsComplete)
+	);
+
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Searching... (Type: %s, Max: %d, LAN: %s)"),
+		*NexusOnline::SessionTypeToName(DesiredType).ToString(),
+		SearchSettings->MaxSearchResults,
+		SearchSettings->bIsLanQuery ? TEXT("YES") : TEXT("NO"));
+	
+	if (!Session->FindSessions(*PlayerID, SearchSettings.ToSharedRef()))
+	{
+		Session->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsHandle);
+		OnCompleted.Broadcast(false, {});
+	}
+}
+
+void UAsyncTask_FindSessions::OnFindSessionsComplete(bool bWasSuccessful)
+{
+	UWorld* World = GEngine->GetWorldFromContextObjectChecked(WorldContextObject);
+	if (!World)
+		return;
+
+	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
+	if (Session.IsValid())
+	{
+		Session->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsHandle);
+	}
 
 	if (!bWasSuccessful || !SearchSettings.IsValid())
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] Search failed or invalid settings."));
+		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] Search failed or returned no results."));
 		OnCompleted.Broadcast(false, {});
 		return;
 	}
 
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Search completed. Raw results found: %d"), SearchSettings->SearchResults.Num());
+	if (SearchSettings->SearchResults.Num() == 0)
+	{
+		UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Search successful but found 0 sessions."));
+		OnCompleted.Broadcast(true, {});
+		return;
+	}
 
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Raw results found: %d. Processing filters..."), SearchSettings->SearchResults.Num());
+	
 	ProcessSearchResults(SearchSettings->SearchResults);
 }
 
 // ──────────────────────────────────────────────
-// Process & filter session results
+// Traitement, Filtrage et Tri
 // ──────────────────────────────────────────────
 void UAsyncTask_FindSessions::ProcessSearchResults(const TArray<FOnlineSessionSearchResult>& InResults)
 {
 	const FString DesiredTypeStr = NexusOnline::SessionTypeToName(DesiredType).ToString();
-
-	TWeakObjectPtr WeakThis(this);
-	const TArray<FSessionSearchFilter> SimpleFiltersCopy = ResolvedSimpleFilters;
-
-	TArray<TWeakObjectPtr<USessionFilterRule>> FilterRules;
-	for (const TObjectPtr<USessionFilterRule>& Rule : ResolvedAdvancedRules)
-	{
-		if (Rule)
-			FilterRules.Add(Rule);
-	}
-
-	TArray<TWeakObjectPtr<USessionSortRule>> SortRules;
-	for (const TObjectPtr<USessionSortRule>& Rule : ResolvedSortRules)
-	{
-		if (Rule)
-			SortRules.Add(Rule);
-	}
-
-	// Capture subsystem type for the async task
+	
 	bool bIsNullSubsystem = false;
-	if (UAsyncTask_FindSessions* Self = WeakThis.Get())
+	if (UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull))
 	{
-		if (UWorld* World = GEngine->GetWorldFromContextObject(Self->WorldContextObject, EGetWorldErrorMode::LogAndReturnNull))
+		if (IOnlineSubsystem* Subsystem = Online::GetSubsystem(World))
 		{
-			if (IOnlineSubsystem* Subsystem = Online::GetSubsystem(World))
-			{
-				bIsNullSubsystem = (Subsystem->GetSubsystemName() == TEXT("NULL"));
-			}
+			bIsNullSubsystem = (Subsystem->GetSubsystemName() == TEXT("NULL"));
 		}
 	}
 
-	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakThis, DesiredTypeStr, InResults, SimpleFiltersCopy, FilterRules, SortRules, bIsNullSubsystem]()
+	TArray<FOnlineSessionSearchResult> FilteredResults;
+	FilteredResults.Reserve(InResults.Num());
+
+	// ---------------------------------------------------------
+	// PHASE 1 : FILTRAGE
+	// ---------------------------------------------------------
+	for (const FOnlineSessionSearchResult& Result : InResults)
 	{
-		if (!WeakThis.IsValid()) return;
+		if (!Result.IsValid())
+			continue;
 
-		TArray<FOnlineSessionSearchResult> FilteredResults;
+		FString FoundType;
+		Result.Session.SessionSettings.Get(TEXT("SESSION_TYPE_KEY"), FoundType);
 
-		for (const FOnlineSessionSearchResult& Result : InResults)
+		if (!FoundType.IsEmpty() && FoundType != DesiredTypeStr)
 		{
-			FString ResultId = Result.GetSessionIdStr();
-			FString FoundType;
-			Result.Session.SessionSettings.Get(TEXT("SESSION_TYPE_KEY"), FoundType);
+			continue;
+		}
+		
+		if (FoundType.IsEmpty() && !bIsNullSubsystem)
+		{
+			continue;
+		}
 
-			// Match type
-			if (!FoundType.IsEmpty() && FoundType != DesiredTypeStr)
+		if (!NexusSessionFilterUtils::PassesAllFilters(ResolvedSimpleFilters, Result))
+		{
+			continue;
+		}
+		
+		bool bRejected = false;
+		for (const TObjectPtr<USessionFilterRule>& Rule : ResolvedAdvancedRules)
+		{
+			if (Rule && Rule->bEnabled && !Rule->PassesFilter(Result))
 			{
-				UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Rejected '%s' (Type mismatch: %s != %s)"), *ResultId, *FoundType, *DesiredTypeStr);
-				continue;
+				bRejected = true;
+				break;
 			}
-			
-			// Special handling for NULL subsystem where we might have stripped the type from the beacon
-			if (FoundType.IsEmpty())
+		}
+		if (bRejected)
+			continue;
+
+		FilteredResults.Add(Result);
+	}
+
+	// ---------------------------------------------------------
+	// PHASE 2 : TRI
+	// ---------------------------------------------------------
+	if (!ResolvedSortRules.IsEmpty() && FilteredResults.Num() > 1)
+	{
+		Algo::Sort(FilteredResults, [this](const FOnlineSessionSearchResult& A, const FOnlineSessionSearchResult& B)
+		{
+			for (const TObjectPtr<USessionSortRule>& Rule : ResolvedSortRules)
 			{
-				if (bIsNullSubsystem)
-				{
-					UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] Session '%s' has no type (likely due to NULL subsystem optimization). Accepting tentatively."), *ResultId);
-				}
-				else
-				{
-					UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Rejected '%s' (No type found)"), *ResultId);
+				if (!Rule || !Rule->bEnabled)
 					continue;
-				}
+
+				if (Rule->Compare(A, B))
+					
+					return true;
+				if (Rule->Compare(B, A))
+					return false;
 			}
-
-			// Simple filters
-			if (!NexusSessionFilterUtils::PassesAllFilters(SimpleFiltersCopy, Result))
-			{
-				UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Rejected '%s' (Failed simple filters)"), *ResultId);
-				continue;
-			}
-
-			// Advanced rules
-			bool bRejected = false;
-			for (const TWeakObjectPtr<USessionFilterRule>& RuleWeak : FilterRules)
-			{
-				const USessionFilterRule* RuleInstance = RuleWeak.Get();
-				if (RuleInstance && RuleInstance->bEnabled && !RuleInstance->PassesFilter(Result))
-				{
-					UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Rejected '%s' (Failed rule: %s)"), *ResultId, *RuleInstance->GetRuleDescription());
-					bRejected = true;
-					break;
-				}
-			}
-			if (bRejected) continue;
-
-			UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Accepted session '%s'"), *ResultId);
-			FilteredResults.Add(Result);
-		}
-
-		// Sorting
-		if (!SortRules.IsEmpty())
-		{
-			Algo::Sort(FilteredResults, [&SortRules](const FOnlineSessionSearchResult& A, const FOnlineSessionSearchResult& B)
-			{
-				for (const TWeakObjectPtr<USessionSortRule>& RuleWeak : SortRules)
-				{
-					const USessionSortRule* Rule = RuleWeak.Get();
-					if (!Rule || !Rule->bEnabled) continue;
-
-					const bool bABeforeB = Rule->Compare(A, B);
-					const bool bBBeforeA = Rule->Compare(B, A);
-					if (bABeforeB != bBBeforeA)
-						return bABeforeB;
-				}
-				return false;
-			});
-		}
-
-		// Build simplified result structure
-		TArray<FOnlineSessionSearchResultData> FinalResults;
-		for (const FOnlineSessionSearchResult& Result : FilteredResults)
-		{
-			FOnlineSessionSearchResultData Data;
-			Result.Session.SessionSettings.Get(TEXT("SESSION_DISPLAY_NAME"), Data.SessionDisplayName);
-			Result.Session.SessionSettings.Get(TEXT("MAP_NAME_KEY"), Data.MapName);
-			Result.Session.SessionSettings.Get(TEXT("GAME_MODE_KEY"), Data.GameMode);
-			Result.Session.SessionSettings.Get(TEXT("SESSION_TYPE_KEY"), Data.SessionType);
-
-			Data.CurrentPlayers = Result.Session.SessionSettings.NumPublicConnections - Result.Session.NumOpenPublicConnections;
-			Data.MaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
-			Data.RawResult = Result;
-
-			FinalResults.Add(MoveTemp(Data));
-		}
-
-		AsyncTask(ENamedThreads::GameThread, [WeakThis, FinalResults = MoveTemp(FinalResults)]() mutable
-		{
-			if (!WeakThis.IsValid()) return;
-
-			if (UAsyncTask_FindSessions* Self = WeakThis.Get())
-			{
-				UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Completed with %d valid results."), FinalResults.Num());
-				Self->OnCompleted.Broadcast(true, FinalResults);
-			}
+			return false; 
 		});
-	});
+	}
+
+	// ---------------------------------------------------------
+	// PHASE 3 : CONVERSION & SORTIE
+	// ---------------------------------------------------------
+	TArray<FOnlineSessionSearchResultData> FinalResults;
+	FinalResults.Reserve(FilteredResults.Num());
+
+	for (const FOnlineSessionSearchResult& Result : FilteredResults)
+	{
+		FOnlineSessionSearchResultData Data;
+		
+		Result.Session.SessionSettings.Get(TEXT("SESSION_DISPLAY_NAME"), Data.SessionDisplayName);
+		Result.Session.SessionSettings.Get(TEXT("MAP_NAME_KEY"), Data.MapName);
+		Result.Session.SessionSettings.Get(TEXT("GAME_MODE_KEY"), Data.GameMode);
+		Result.Session.SessionSettings.Get(TEXT("SESSION_TYPE_KEY"), Data.SessionType);
+
+		Data.CurrentPlayers = Result.Session.SessionSettings.NumPublicConnections - Result.Session.NumOpenPublicConnections;
+		Data.MaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
+		Data.Ping = Result.PingInMs;
+		
+		Data.RawResult = Result;
+
+		FinalResults.Add(MoveTemp(Data));
+	}
+
+	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Completed. %d sessions kept out of %d."), FinalResults.Num(), InResults.Num());
+	OnCompleted.Broadcast(true, FinalResults);
 }
 
 // ──────────────────────────────────────────────
-// Build the merged list of filters
+// Helpers
 // ──────────────────────────────────────────────
+
 void UAsyncTask_FindSessions::RebuildResolvedFilters()
 {
 	ResolvedSimpleFilters = UserSimpleFilters;
@@ -342,55 +288,57 @@ void UAsyncTask_FindSessions::RebuildResolvedFilters()
 	ResolvedAdvancedRules.Append(UserAdvancedRules);
 	ResolvedSortRules.Append(UserSortRules);
 
-	// Sort by priority
-	ResolvedAdvancedRules.Sort([](const TObjectPtr<USessionFilterRule>& A, const TObjectPtr<USessionFilterRule>& B)
+	Algo::Sort(ResolvedAdvancedRules, [](const TObjectPtr<USessionFilterRule>& A, const TObjectPtr<USessionFilterRule>& B)
 	{
-		return A && B ? (A->Priority < B->Priority) : (B != nullptr);
+		return A && B ? (A->Priority > B->Priority) : (A != nullptr);
 	});
 	
-	ResolvedSortRules.Sort([](const TObjectPtr<USessionSortRule>& A, const TObjectPtr<USessionSortRule>& B)
+	Algo::Sort(ResolvedSortRules, [](const TObjectPtr<USessionSortRule>& A, const TObjectPtr<USessionSortRule>& B)
 	{
-		return A && B ? (A->Priority < B->Priority) : (B != nullptr);
+		return A && B ? (A->Priority > B->Priority) : (A != nullptr);
 	});
 }
 
-// ──────────────────────────────────────────────
-// Apply query filters
-// ──────────────────────────────────────────────
 void UAsyncTask_FindSessions::ApplyQueryFilters()
 {
-    if (!SearchSettings.IsValid())
-       return;
+	if (!SearchSettings.IsValid())
+		return;
+	
+	if (SearchSettings->bIsLanQuery)
+		return;
+	
+	auto SetDefaultIfMissing = [&](FName Key, const auto& Value, EOnlineComparisonOp::Type Op)
+	{
+		bool bFound = false;
+		for(const auto& Filter : ResolvedSimpleFilters)
+		{
+			if(Filter.Key == Key)
+			{
+				bFound = true;
+				break;
+			}
+		}
 
-    SearchSettings->MaxSearchResults = 9999; 
+		if(!bFound)
+		{
+			SearchSettings->QuerySettings.Set(Key, Value, Op);
+		}
+	};
 
-    if (SearchSettings->bIsLanQuery)
-    	return;
+	SetDefaultIfMissing(TEXT("SEARCH_PRESENCE"), true, EOnlineComparisonOp::Equals);
+	SetDefaultIfMissing(TEXT("SEARCH_LOBBIES"), true, EOnlineComparisonOp::Equals);
+	SetDefaultIfMissing(TEXT("LOBBYDISTANCE"), 3, EOnlineComparisonOp::Equals);
 
-    SearchSettings->QuerySettings.Set(TEXT("SEARCH_PRESENCE"), true, EOnlineComparisonOp::Equals);
-    SearchSettings->QuerySettings.Set(TEXT("SEARCH_LOBBIES"), true, EOnlineComparisonOp::Equals);
-    SearchSettings->QuerySettings.Set(TEXT("LOBBYDISTANCE"), 3, EOnlineComparisonOp::Equals); // 3 = Worldwide
-    SearchSettings->QuerySettings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(DesiredType).ToString(), EOnlineComparisonOp::Equals);
-    
-    NexusSessionFilterUtils::ApplyFiltersToSettings(ResolvedSimpleFilters, *SearchSettings);
+	SearchSettings->QuerySettings.Set(TEXT("SESSION_TYPE_KEY"), NexusOnline::SessionTypeToName(DesiredType).ToString(), EOnlineComparisonOp::Equals);
+	NexusSessionFilterUtils::ApplyFiltersToSettings(ResolvedSimpleFilters, *SearchSettings);
 
-    for (const TObjectPtr<USessionFilterRule>& Rule : ResolvedAdvancedRules)
-    {
-       if (Rule && Rule->bEnabled && Rule->bApplyToSearchQuery)
-       {
-          Rule->ConfigureSearchSettings(*SearchSettings);
-          UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[FindSessions] Applied query rule: %s"), *Rule->GetRuleDescription());
-       }
-    }
-
-    for (const TObjectPtr<USessionSortRule>& Rule : ResolvedSortRules)
-    {
-       if (Rule && Rule->bEnabled)
-       {
-          Rule->ConfigureSearchSettings(*SearchSettings);
-          UE_LOG(LogNexusOnlineSort, Verbose, TEXT("[FindSessions] Applied sort rule: %s"), *Rule->GetRuleDescription());
-       }
-    }
+	for (const TObjectPtr<USessionFilterRule>& Rule : ResolvedAdvancedRules)
+	{
+		if (Rule && Rule->bEnabled && Rule->bApplyToSearchQuery)
+		{
+			Rule->ConfigureSearchSettings(*SearchSettings);
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE
