@@ -3,7 +3,6 @@
 
 FString UNexusLinkHelpers::MakeLink(const FString& Type, const FString& Data, const FString& DisplayText)
 {
-	// Escape quotes in data to prevent markup issues
 	FString SafeData = Data.Replace(TEXT("\""), TEXT("&quot;"));
 	return FString::Printf(TEXT("<link type=\"%s\" data=\"%s\">%s</>"), *Type, *SafeData, *DisplayText);
 }
