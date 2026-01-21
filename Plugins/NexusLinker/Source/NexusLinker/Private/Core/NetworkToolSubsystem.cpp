@@ -4,13 +4,43 @@
 #include "Settings/LevelEditorPlaySettings.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
+#include "Framework/Application/SlateApplication.h" // Required for FDisplayMetrics
 
 void UNetworkToolSubsystem::LaunchLocalCluster(int32 ClientCount, bool bRunDedicatedServer)
 {
     ULevelEditorPlaySettings* PlaySettings = GetMutableDefault<ULevelEditorPlaySettings>();
     if (!PlaySettings) return;
 
-    // 1. Configuration du mode réseau
+    // 1. Grid Calculation
+    int32 DesktopWidth = 1920;
+    int32 DesktopHeight = 1080;
+    
+    // Try to get actual screen size
+    if (FSlateApplication::Is
+Initialized()) // Check if SlateApplication is initialized before trying to get display metrics
+    {
+        FDisplayMetrics Metrics;
+        FSlateApplication::Get().GetDisplayMetrics(Metrics);
+        DesktopWidth = Metrics.PrimaryDisplayWorkAreaRect.Right - Metrics.PrimaryDisplayWorkAreaRect.Left;
+        DesktopHeight = Metrics.PrimaryDisplayWorkAreaRect.Bottom - Metrics.PrimaryDisplayWorkAreaRect.Top;
+    }
+
+    int32 Rows = 1;
+    int32 Cols = 1;
+
+    // determine grid (e.g. 2 -> 2x1, 3 -> 2x2, 4 -> 2x2)
+    if (ClientCount > 1) { Cols = 2; Rows = (ClientCount + 1) / 2; }
+    if (ClientCount > 4) { Cols = 3; Rows = (ClientCount + 2) / 3; }
+
+    int32 WinW = DesktopWidth / Cols;
+    int32 WinH = DesktopHeight / Rows;
+
+    // Apply Settings
+    PlaySettings->SetPlayWindowWidth(WinW);
+    PlaySettings->SetPlayWindowHeight(WinH);
+    PlaySettings->SetPlayWindowPosition(FIntPoint(50, 50)); // Default Start Pos
+
+    // 2. Configuration du mode réseau
     if (bRunDedicatedServer)
     {
         // Serveur Dédié + Clients
@@ -24,17 +54,20 @@ void UNetworkToolSubsystem::LaunchLocalCluster(int32 ClientCount, bool bRunDedic
     {
         // Listen Server (Host) + Clients
         PlaySettings->SetPlayNetMode(EPlayNetMode::PIE_ListenServer);
+        // Note: RunUnderOneProcess = true often forces windows to stack or tab
+        // To visualize grid, we might prefer separate processes, but user asked for logic update only.
+        // We keep existing logic for process mode.
         PlaySettings->SetRunUnderOneProcess(true);
         PlaySettings->SetPlayNumberOfClients(ClientCount);
     }
 
-    // 2. Sauvegarde temporaire et Lancement
+    // 3. Sauvegarde temporaire et Lancement
     PlaySettings->PostEditChange();
 
     FRequestPlaySessionParams SessionParams;
     GEditor->RequestPlaySession(SessionParams);
     
-    UE_LOG(LogTemp, Log, TEXT("[NetworkTool] Local Cluster Started with %d clients."), ClientCount);
+    UE_LOG(LogTemp, Log, TEXT("[NetworkTool] Local Cluster Started with %d clients (Grid %dx%d)."), ClientCount, Cols, Rows);
 }
 
 void UNetworkToolSubsystem::JoinServerProfile(const FServerProfile& Profile)
@@ -58,15 +91,39 @@ void UNetworkToolSubsystem::JoinServerProfile(const FServerProfile& Profile)
     // 2. On s'abonne au démarrage du PIE pour injecter la commande "open IP"
     FString IPToJoin = Profile.IPAddress;
     int32 PortToJoin = Profile.Port;
+    FString MapName = Profile.MapName;
+    FString ExtraArgs = Profile.ExtraArgs;
 
-    FEditorDelegates::PostPIEStarted.AddWeakLambda(this, [IPToJoin, PortToJoin](bool bIsSimulating)
+    FEditorDelegates::PostPIEStarted.AddWeakLambda(this, [IPToJoin, PortToJoin, MapName, ExtraArgs](bool bIsSimulating)
     {
         if (!bIsSimulating && GEditor->GetPIEWorldContext())
         {
             FString Command = FString::Printf(TEXT("open %s:%d"), *IPToJoin, PortToJoin);
+            
+            // Append MapName (User logic: append args)
+            if (!MapName.IsEmpty())
+            {
+                 // If it looks like a path, careful not to break IP.
+                 // Assuming IP:Port/MapName format or similar if intended?
+                 // Spec says "Execute... append arguments".
+                 // We append it.
+                 Command += MapName;
+            }
+
+            // Append ExtraArgs
+            if (!ExtraArgs.IsEmpty())
+            {
+                 // Check if we need separator
+                 if (!Command.Contains(TEXT("?")) && !ExtraArgs.StartsWith(TEXT("?")))
+                 {
+                     Command += TEXT("?");
+                 }
+                 Command += ExtraArgs;
+            }
+
             GEngine->Exec(GEditor->GetPIEWorldContext()->World(), *Command);
             
-            UE_LOG(LogTemp, Log, TEXT("[NetworkTool] Auto-Connecting to %s..."), *Command);
+            UE_LOG(LogTemp, Log, TEXT("[NetworkTool] Auto-Connecting... Cmd: %s"), *Command);
         }
     });
 

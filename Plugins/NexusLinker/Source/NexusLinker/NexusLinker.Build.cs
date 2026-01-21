@@ -45,7 +45,8 @@ public class NexusLinker : ModuleRules
 			"DeveloperSettings",
 			"WorkspaceMenuStructure",
 			"EditorStyle",
-			"Projects"
+			"Projects",
+			"Settings"
 		});
 		
 		

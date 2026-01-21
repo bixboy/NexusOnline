@@ -31,6 +31,12 @@ struct FServerProfile
 	UPROPERTY(EditAnywhere, Category = "Network")
 	int32 Port = 7777;
 
+	UPROPERTY(EditAnywhere, Category = "Config")
+	FString MapName;
+
+	UPROPERTY(EditAnywhere, Category = "Config")
+	FString ExtraArgs;
+
 	// Pour l'API HTTP (Start/Stop)
 	UPROPERTY(EditAnywhere, Category = "Remote Control")
 	FString ApiUrl_Start; 

@@ -1,4 +1,5 @@
 ﻿#include "UI/SNetworkDashboard.h"
+#include "ISettingsModule.h" // Added for Quick Edit Settings
 #include "Core/NetworkToolSubsystem.h"
 #include "Core/NetworkToolSettings.h"
 #include "Editor.h"
@@ -51,15 +52,34 @@ void SNetworkDashboard::Construct(const FArguments& InArgs)
                     + SHeaderRow::Column("Actions").DefaultLabel(LOCTEXT("ColActions", "Controls")).FillWidth(0.4f)
                 )
             ]
-            // Bouton Refresh
+            // Boutons (Settings + Refresh)
             + SVerticalBox::Slot().AutoHeight().Padding(5)
             [
-                SNew(SButton)
-                .HAlign(HAlign_Center)
-                .OnClicked_Lambda([this]() { RefreshServerList(); return FReply::Handled(); })
-                .Content()
+                SNew(SHorizontalBox)
+                // Quick Edit Settings Button
+                + SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 5, 0)
                 [
-                    SNew(STextBlock).Text(LOCTEXT("RefreshBtn", "Reload Profiles from Settings"))
+                    SNew(SButton)
+                    .HAlign(HAlign_Center)
+                    .OnClicked_Lambda([]() {
+                        FModuleManager::LoadModuleChecked<ISettingsModule>("Settings").ShowViewer("Project", "Plugins", "NexusLinker");
+                        return FReply::Handled();
+                    })
+                    .Content()
+                    [
+                        SNew(STextBlock).Text(LOCTEXT("SettingsBtn", "Edit Config"))
+                    ]
+                ]
+                // Refresh Button
+                + SHorizontalBox::Slot().FillWidth(0.5f).Padding(5, 0, 0, 0)
+                [
+                    SNew(SButton)
+                    .HAlign(HAlign_Center)
+                    .OnClicked_Lambda([this]() { RefreshServerList(); return FReply::Handled(); })
+                    .Content()
+                    [
+                        SNew(STextBlock).Text(LOCTEXT("RefreshBtn", "Reload Profiles"))
+                    ]
                 ]
             ]
         ]
