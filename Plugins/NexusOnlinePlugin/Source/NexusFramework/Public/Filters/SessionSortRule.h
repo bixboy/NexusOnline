@@ -7,10 +7,8 @@
 class FOnlineSessionSearch;
 class FOnlineSessionSearchResult;
 
-/**
- * Règle de tri personnalisable pour organiser les résultats.
- */
-UCLASS(Abstract, Blueprintable, EditInlineNew, DefaultToInstanced)
+
+UCLASS(Abstract, Blueprintable, DefaultToInstanced, EditInlineNew)
 class NEXUSFRAMEWORK_API USessionSortRule : public UObject
 {
         GENERATED_BODY()

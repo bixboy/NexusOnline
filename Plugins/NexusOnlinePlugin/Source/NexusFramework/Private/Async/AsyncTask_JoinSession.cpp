@@ -1,6 +1,5 @@
 ﻿#include "Async/AsyncTask_JoinSession.h"
 #include "OnlineSubsystem.h"
-#include "Filters/SessionFilterRule.h"
 #include "Interfaces/OnlineSessionInterface.h"
 #include "GameFramework/PlayerController.h"
 #include "Utils/NexusOnlineHelpers.h"
@@ -28,7 +27,7 @@ void UAsyncTask_JoinSession::Activate()
 {
 	if (!WorldContextObject)
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Invalid WorldContextObject."));
+		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Invalid WorldContextObject."));
 		OnFailure.Broadcast();
 		return;
 	}
@@ -43,7 +42,7 @@ void UAsyncTask_JoinSession::Activate()
 	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
 	if (!Session.IsValid())
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Online session interface invalid."));
+		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Online session interface invalid."));
 		OnFailure.Broadcast();
 		return;
 	}
@@ -54,7 +53,7 @@ void UAsyncTask_JoinSession::Activate()
 
 	if (MaxPublic > 0 && OpenPublic <= 0)
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[JoinSession] Session '%s' appears full (%d/%d). Aborting."),
+		UE_LOG(LogTemp, Warning, TEXT("[JoinSession] Session '%s' appears full (%d/%d). Aborting."),
 			*InternalSessionName.ToString(),
 			(MaxPublic - OpenPublic),
 			MaxPublic);
@@ -65,7 +64,7 @@ void UAsyncTask_JoinSession::Activate()
 	
 	if (Session->GetNamedSession(InternalSessionName))
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[JoinSession] Existing session found. Leaving before joining new one..."));
+		UE_LOG(LogTemp, Warning, TEXT("[JoinSession] Existing session found. Leaving before joining new one..."));
 		
 		DestroyDelegateHandle = Session->AddOnDestroySessionCompleteDelegate_Handle(
 			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UAsyncTask_JoinSession::OnOldSessionDestroyed)
@@ -114,7 +113,7 @@ void UAsyncTask_JoinSession::JoinSessionInternal()
 		FOnJoinSessionCompleteDelegate::CreateUObject(this, &UAsyncTask_JoinSession::OnJoinSessionComplete)
 	);
 
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[JoinSession] Joining session '%s'..."), *InternalSessionName.ToString());
+	UE_LOG(LogTemp, Log, TEXT("[JoinSession] Joining session '%s'..."), *InternalSessionName.ToString());
 
 	TSharedPtr<const FUniqueNetId> LocalPlayerId;
 	if (APlayerController* PC = World->GetFirstPlayerController())
@@ -165,7 +164,7 @@ void UAsyncTask_JoinSession::OnJoinSessionComplete(FName SessionName, EOnJoinSes
 
 	if (Result != EOnJoinSessionCompleteResult::Success)
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Failed with code %d."), static_cast<int32>(Result));
+		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Failed with code %d."), static_cast<int32>(Result));
 		OnFailure.Broadcast();
 		return;
 	}
@@ -173,19 +172,19 @@ void UAsyncTask_JoinSession::OnJoinSessionComplete(FName SessionName, EOnJoinSes
 	FString ConnectString;
 	if (!Session->GetResolvedConnectString(SessionName, ConnectString))
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[JoinSession] Failed to resolve connect string (URL)."));
+		UE_LOG(LogTemp, Error, TEXT("[JoinSession] Failed to resolve connect string (URL)."));
 		OnFailure.Broadcast();
 		return;
 	}
 	
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[JoinSession] Success. Connect String: %s"), *ConnectString);
+	UE_LOG(LogTemp, Log, TEXT("[JoinSession] Success. Connect String: %s"), *ConnectString);
 
 	OnSuccess.Broadcast();
 	if (bShouldAutoTravel)
 	{
 		if (APlayerController* PC = World->GetFirstPlayerController())
 		{
-			UE_LOG(LogNexusOnlineFilter, Log, TEXT("[JoinSession] Executing ClientTravel..."));
+			UE_LOG(LogTemp, Log, TEXT("[JoinSession] Executing ClientTravel..."));
 			PC->ClientTravel(ConnectString, TRAVEL_Absolute);
 		}
 	}

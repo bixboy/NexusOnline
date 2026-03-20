@@ -14,7 +14,8 @@ public class NexusOnlinePlugin : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"OnlineSubsystem",
-			"OnlineSubsystemUtils"
+			"OnlineSubsystemUtils",
+			"NexusFramework"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -23,14 +24,6 @@ public class NexusOnlinePlugin : ModuleRules
 			"SlateCore"
 		});
 
-		PublicIncludePaths.AddRange(new string[]
-		{
-			"NexusOnlineFramework/Public"
-		});
 
-		PrivateIncludePaths.AddRange(new string[]
-		{
-			"NexusOnlineFramework/Private"
-		});
 	}
 }

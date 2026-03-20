@@ -198,8 +198,6 @@ void UNexusChatWindow::HandleTextCommitted(const FText& Text, ETextCommit::Type 
 		{
 			for(int32 i = 0; i < EnumPtr->NumEnums(); i++)
 			{
-				if (EnumPtr->HasMetaData(TEXT("Hidden"), i))
-					continue;
 
 				int64 Val = EnumPtr->GetValueByIndex(i);
 				if (Val == static_cast<int64>(ENexusChatChannel::Global))

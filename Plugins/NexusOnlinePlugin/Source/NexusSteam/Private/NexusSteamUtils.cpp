@@ -1,4 +1,4 @@
-﻿#include "Utils/NexusSteamUtils.h"
+#include "NexusSteamUtils.h"
 #include "OnlineSubsystemUtils.h"
 #include "OnlineSubsystemTypes.h"
 #include "OnlineSubsystem.h"
@@ -29,15 +29,43 @@ static IOnlineSubsystem* GetOSS(UObject* WorldContextObject)
 
 void UNexusSteamUtils::BuildFriendInfo(const TSharedRef<FOnlineFriend>& InFriend, FSteamFriendInfo& OutInfo)
 {
-	OutInfo.DisplayName = InFriend->GetDisplayName().IsEmpty() ? TEXT("Unknown") : InFriend->GetDisplayName();
-	OutInfo.RealName    = InFriend->GetRealName();
-	OutInfo.UniqueId    = FUniqueNetIdRepl(InFriend->GetUserId());
+	// Retrieve safe display name first
+    FString DisplayName = InFriend->GetDisplayName();
+    if (DisplayName.IsEmpty())
+    {
+        DisplayName = TEXT("Unknown");
+    }
+    
+    // Log trace
+    UE_LOG(LogTemp, Warning, TEXT("[NexusSteam] Processing Friend: %s"), *DisplayName);
 
+	OutInfo.DisplayName = DisplayName;
+	OutInfo.RealName    = InFriend->GetRealName();
+	
+    // Validate UserID
+    if (InFriend->GetUserId()->IsValid())
+    {
+	    OutInfo.UniqueId = FUniqueNetIdRepl(InFriend->GetUserId());
+    }
+    else
+    {
+        OutInfo.UniqueId = FUniqueNetIdRepl();
+        UE_LOG(LogTemp, Warning, TEXT("[NexusSteam] Friend '%s' has invalid UserID!"), *DisplayName);
+    }
+
+    // Safety access for Presence
+    UE_LOG(LogTemp, Warning, TEXT("  - Accessing Presence..."));
 	const FOnlineUserPresence& Presence = InFriend->GetPresence();
-	OutInfo.PresenceStatus = Presence.Status.StatusStr;
+    
+    // Copy string carefully (this was the likely crash point)
+    UE_LOG(LogTemp, Warning, TEXT("  - Copying Presence Status..."));
+    OutInfo.PresenceStatus = Presence.Status.StatusStr;
+    UE_LOG(LogTemp, Warning, TEXT("  - Status: %s"), *OutInfo.PresenceStatus);
+    
 	OutInfo.bIsOnline   = Presence.bIsOnline;
 	OutInfo.bIsPlaying  = Presence.bIsPlaying || Presence.bIsPlayingThisGame;
 	OutInfo.bIsJoinable = Presence.bIsJoinable;
+    UE_LOG(LogTemp, Warning, TEXT("  - Friend Processed."));
 }
 
 void UNexusSteamUtils::FillFriendsFromOSS(UObject* WorldContextObject, TArray<FSteamFriendInfo>& OutFriends, int32 UserIndex, FName ListName)

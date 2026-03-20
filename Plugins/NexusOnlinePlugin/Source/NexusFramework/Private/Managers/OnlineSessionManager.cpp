@@ -26,6 +26,13 @@ AOnlineSessionManager::AOnlineSessionManager()
 void AOnlineSessionManager::BeginPlay()
 {
     Super::BeginPlay();
+    UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] BeginPlay Started. This: %p, World: %p"), this, GetWorld());
+
+    // Cache this instance for O(1) Get() access, keyed by world for PIE support
+    if (UWorld* World = GetWorld())
+    {
+        CachedInstances.Add(World, this);
+    }
 
     if (HasAuthority())
     {
@@ -45,10 +52,20 @@ void AOnlineSessionManager::BeginPlay()
             OnRep_PlayerCount();
         }
     }
+    UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] BeginPlay Finished."));
 }
 
 void AOnlineSessionManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    if (UWorld* World = GetWorld())
+    {
+        TWeakObjectPtr<AOnlineSessionManager>* Found = CachedInstances.Find(World);
+        if (Found && Found->Get() == this)
+        {
+            CachedInstances.Remove(World);
+        }
+    }
+
     if (HasAuthority())
     {
         UnbindSessionDelegates();
@@ -89,7 +106,8 @@ void AOnlineSessionManager::ForceUpdatePlayerCount()
 
 void AOnlineSessionManager::RefreshPlayerCount()
 {
-	if (!HasAuthority())
+    UE_LOG(LogTemp, Verbose, TEXT("[AOnlineSessionManager] RefreshPlayerCount Called."));
+    if (!HasAuthority())
 		return;
 
 	UWorld* World = GetWorld();
@@ -146,6 +164,7 @@ void AOnlineSessionManager::RefreshPlayerCount()
 
 void AOnlineSessionManager::UpdateHeir()
 {
+    UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] UpdateHeir Called."));
     if (!HasAuthority())
         return;
 
@@ -155,7 +174,10 @@ void AOnlineSessionManager::UpdateHeir()
 
     FNamedOnlineSession* NamedSession = Session->GetNamedSession(TrackedSessionName);
     if (!NamedSession)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] UpdateHeir: NamedSession not found."));
         return;
+    }
 
     // Get Host ID
     TSharedPtr<const FUniqueNetId> HostId;
@@ -166,42 +188,62 @@ void AOnlineSessionManager::UpdateHeir()
 
     FString BestHeirId;
 
-    // Iterate through registered players to find the oldest non-host client
-    // RegisteredPlayers order is usually preservation order of joining? 
-    // If not, we might need a better metric, but for now simple iteration is fine.
-    	// Iterate through registered players to find the oldest non-host client
+    // Cache GameState players for O(N) lookup
+    TSet<FString> ActivePlayers;
+    if (AGameStateBase* GS = GetWorld()->GetGameState())
+    {
+        for (APlayerState* PS : GS->PlayerArray)
+        {
+            if (PS && PS->GetUniqueId().IsValid())
+            {
+                ActivePlayers.Add(PS->GetUniqueId().ToString());
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] Checking %d Registered Players..."), NamedSession->RegisteredPlayers.Num());
+
 	for (const FUniqueNetIdRef& PlayerId : NamedSession->RegisteredPlayers)
 	{
+        FString CandidateId = PlayerId->ToString();
+        UE_LOG(LogTemp, Warning, TEXT("  - Candidate: %s"), *CandidateId);
+
 		// Skip Host
 		if (HostId.IsValid() && *PlayerId == *HostId)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("    -> Is Host. Skipping."));
 			continue;
+        }
 
 		// Skip invalid
 		if (!PlayerId->IsValid())
 			continue;
 
-		// Found our heir (first valid non-host player)
-		BestHeirId = PlayerId->ToString();
-		UE_LOG(LogTemp, Log, TEXT("[SessionManager] Heir elected via Session: %s"), *BestHeirId);
-		break;
+        // Cross-reference with GameState to ensure they haven't timed out/disconnected
+        if (ActivePlayers.Contains(CandidateId))
+        {
+		    BestHeirId = CandidateId;
+		    UE_LOG(LogTemp, Warning, TEXT("[SessionManager] Heir elected via Session+GameState: %s"), *BestHeirId);
+		    break;
+        }
 	}
 
-	// Fallback: Check GameState if Session list didn't yield an heir (common in PIE or broken sessions)
+	// Fallback: Check GameState if Session list didn't yield an heir
 	if (BestHeirId.IsEmpty() && GetWorld()->GetGameState())
 	{
+        UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] Using Fallback GameState Loop..."));
 		for (APlayerState* PS : GetWorld()->GetGameState()->PlayerArray)
 		{
 			if (!PS) continue;
 			
-			// Skip Local Player (Host)
-			if (PS->GetPlayerController() && PS->GetPlayerController()->IsLocalController())
+			// Skip Host (Local Player) using HostId captured earlier
+			if (HostId.IsValid() && PS->GetUniqueId().IsValid() && *PS->GetUniqueId() == *HostId)
 				continue;
 
-			// Check ID validity
 			if (PS->GetUniqueId().IsValid())
 			{
 				BestHeirId = PS->GetUniqueId().ToString();
-				UE_LOG(LogTemp, Warning, TEXT("[SessionManager] Heir elected via GameState: %s"), *BestHeirId);
+				UE_LOG(LogTemp, Warning, TEXT("[SessionManager] Heir elected via GameState (Fallback): %s"), *BestHeirId);
 				break;
 			}
 		}
@@ -210,8 +252,9 @@ void AOnlineSessionManager::UpdateHeir()
     if (NextHostUniqueId != BestHeirId)
     {
         NextHostUniqueId = BestHeirId;
+        UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] New Heir Selected: %s"), *NextHostUniqueId);
         
-        // Cache on Server (local)
+        // Cache on Server (for local migration subsystem awareness)
         if (UGameInstance* GI = GetGameInstance())
         {
              if (UNexusMigrationSubsystem* Subsystem = GI->GetSubsystem<UNexusMigrationSubsystem>())
@@ -220,6 +263,7 @@ void AOnlineSessionManager::UpdateHeir()
              }
         }
     }
+    UE_LOG(LogTemp, Warning, TEXT("[AOnlineSessionManager] UpdateHeir Finished."));
 }
 
 void AOnlineSessionManager::OnRep_NextHostUniqueId()
@@ -352,6 +396,9 @@ FString AOnlineSessionManager::GetPlayerNameFromId(const FUniqueNetId& PlayerId)
     return PlayerId.ToString();
 }
 
+// Static per-world cache
+TMap<TWeakObjectPtr<UWorld>, TWeakObjectPtr<AOnlineSessionManager>> AOnlineSessionManager::CachedInstances;
+
 AOnlineSessionManager* AOnlineSessionManager::Get(UObject* WorldContextObject)
 {
     if (!WorldContextObject)
@@ -361,9 +408,21 @@ AOnlineSessionManager* AOnlineSessionManager::Get(UObject* WorldContextObject)
     if (!World)
         return nullptr;
 
+    // O(1) cached path — per-world
+    if (TWeakObjectPtr<AOnlineSessionManager>* Found = CachedInstances.Find(World))
+    {
+        if (Found->IsValid())
+        {
+            return Found->Get();
+        }
+        CachedInstances.Remove(World);
+    }
+
+    // Fallback: TActorIterator (after level transitions when cache is stale)
     TActorIterator<AOnlineSessionManager> It(World);
     if (It)
     {
+        CachedInstances.Add(World, *It);
         return *It;
     }
     
@@ -389,7 +448,105 @@ AOnlineSessionManager* AOnlineSessionManager::Spawn(UObject* WorldContextObject,
     if (Manager)
     {
         Manager->TrackedSessionName = InSessionName;
+        CachedInstances.Add(World, Manager);
     }
     
     return Manager;
+}
+
+// ──────────────────────────────────────────────
+// HOST REGISTRATION
+// ──────────────────────────────────────────────
+
+void AOnlineSessionManager::RegisterLocalHost()
+{
+	if (!HasAuthority()) 
+		return;
+
+	RegisterHostRetries = 0;
+	TryRegisterHost();
+}
+
+void AOnlineSessionManager::TryRegisterHost()
+{
+	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(GetWorld());
+	if (!Session.IsValid())
+		return;
+
+	FNamedOnlineSession* Named = Session->GetNamedSession(TrackedSessionName);
+	if (!Named)
+		return;
+
+	if (IsRunningDedicatedServer())
+		return;
+
+	FUniqueNetIdRepl HostId;
+	if (GetHostUniqueId(HostId))
+	{
+		Session->RegisterPlayer(TrackedSessionName, *HostId, false);
+		if (Session->GetSessionState(TrackedSessionName) == EOnlineSessionState::Pending)
+		{
+			Session->StartSession(TrackedSessionName);
+			UE_LOG(LogTemp, Log, TEXT("[SessionManager] Session Started after Host Registration."));
+		}
+
+		Session->UpdateSession(TrackedSessionName, Named->SessionSettings, true);
+		UE_LOG(LogTemp, Log, TEXT("[SessionManager] Host Registered: %s"), *HostId.ToString());
+		
+		GetWorldTimerManager().ClearTimer(TimerHandle_RetryRegister);
+	}
+	else
+	{
+		RegisterHostRetries++;
+		if (RegisterHostRetries < MAX_REGISTER_RETRIES)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("[SessionManager] Host ID not ready, retrying... (%d/%d)"), RegisterHostRetries, MAX_REGISTER_RETRIES);
+			GetWorldTimerManager().SetTimer(TimerHandle_RetryRegister, this, &AOnlineSessionManager::TryRegisterHost, 0.5f, false);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[SessionManager] Failed to register host after %d retries. Session might not be visible correctly."), MAX_REGISTER_RETRIES);
+		}
+	}
+}
+
+bool AOnlineSessionManager::GetHostUniqueId(FUniqueNetIdRepl& OutId) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+		return false;
+
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (APlayerState* PS = PC->PlayerState)
+		{
+			FUniqueNetIdRepl Id = PS->GetUniqueId();
+			if (Id.IsValid())
+			{
+				OutId = Id;
+				return true;
+			}
+		}
+	}
+
+	if (ULocalPlayer* LP = World->GetFirstLocalPlayerFromController())
+	{
+		FUniqueNetIdRepl Id = LP->GetPreferredUniqueNetId();
+		if (Id.IsValid())
+		{
+			OutId = Id;
+			return true;
+		}
+	}
+
+	if (IOnlineIdentityPtr Identity = NexusOnline::GetIdentityInterface(World))
+	{
+		if (TSharedPtr<const FUniqueNetId> Id = Identity->GetUniquePlayerId(0))
+		{
+			OutId = FUniqueNetIdRepl(Id);
+			return true;
+		}
+	}
+
+	return false;
 }

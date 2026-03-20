@@ -1,4 +1,5 @@
 ﻿#include "TestDebugs/WBP_NexusOnlineDebug.h"
+#include "Data/NexusSessionConfig.h"
 #include "Async/AsyncTask_CreateSession.h"
 #include "Async/AsyncTask_DestroySession.h"
 #include "Async/AsyncTask_FindSessions.h"
@@ -53,18 +54,26 @@ void UWBP_NexusOnlineDebug::NativeTick(const FGeometry& MyGeometry, float InDelt
 void UWBP_NexusOnlineDebug::OnCreateClicked()
 {
 	FSessionSettingsData Settings;
-	Settings.SessionName = TEXT("Nexus Demo Session");
-	Settings.SessionType = ENexusSessionType::GameSession;
-	Settings.MaxPlayers = 5;
-	Settings.bIsPrivate = false;
-	Settings.bIsLAN = IsLan;
-	Settings.MapName = MapName;
-	Settings.GameMode = TEXT("Default");
-	Settings.SessionIdLength = 10;
-	
-	// ENABLE MIGRATION TEST
-	Settings.bAllowHostMigration = true;
-	Settings.MigrationSessionID = NexusOnline::GenerateRandomSessionId(16);
+
+	if (SessionDebugConfig)
+	{
+		Settings = SessionDebugConfig->SessionSettings;
+	}
+	else
+	{
+		Settings.SessionName = TEXT("Nexus Demo Session");
+		Settings.SessionType = ENexusSessionType::GameSession;
+		Settings.MaxPlayers = 5;
+		Settings.bIsPrivate = false;
+		Settings.bIsLAN = IsLan;
+		Settings.MapName = MapName;
+		Settings.GameMode = TEXT("Default");
+		Settings.SessionIdLength = 10;
+		
+		// ENABLE MIGRATION TEST
+		Settings.bAllowHostMigration = true;
+		Settings.MigrationSessionID = NexusOnline::GenerateRandomSessionId(16);
+	}
 
 	// Cache Settings for Migration Subsystem
 	if (UGameInstance* GI = GetGameInstance())
@@ -84,6 +93,15 @@ void UWBP_NexusOnlineDebug::OnCreateClicked()
 	ExtraSettings.Add(BuildFilter);
 
 	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Starting CreateSession Task..."));
+	
+	// Reset Migration State to ensure clean slate
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UNexusMigrationSubsystem* MigSub = GI->GetSubsystem<UNexusMigrationSubsystem>())
+		{
+			MigSub->SetIntentionalLeave(false);
+		}
+	}
 
 	UAsyncTask_CreateSession* Task = UAsyncTask_CreateSession::CreateSession(
 	   this, 
@@ -129,6 +147,15 @@ void UWBP_NexusOnlineDebug::OnJoinClicked()
 	
 	UE_LOG(LogTemp, Log, TEXT("[DebugWidget] Searching sessions..."));
 	GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Yellow, TEXT("Searching..."));
+
+	// Reset Migration State
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UNexusMigrationSubsystem* MigSub = GI->GetSubsystem<UNexusMigrationSubsystem>())
+		{
+			MigSub->SetIntentionalLeave(false);
+		}
+	}
 
 	UAsyncTask_FindSessions* Task = UAsyncTask_FindSessions::FindSessions(
 		this,
@@ -229,7 +256,7 @@ void UWBP_NexusOnlineDebug::OnLeaveClicked()
 	{
 		if (UNexusMigrationSubsystem* MigSub = GI->GetSubsystem<UNexusMigrationSubsystem>())
 		{
-			MigSub->SetIntentionalLeave(true);
+			MigSub->SetIntentionalLeave(false);
 		}
 	}
 
@@ -272,7 +299,9 @@ void UWBP_NexusOnlineDebug::TryBindToSessionManager()
 
 void UWBP_NexusOnlineDebug::OnPlayerCountChanged(int32 NewCount)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] OnPlayerCountChanged Called. NewCount: %d"), NewCount);
 	UpdateSessionDisplay();
+	UE_LOG(LogTemp, Warning, TEXT("[DebugWidget] OnPlayerCountChanged Finished UpdateSessionDisplay."));
 }
 
 void UWBP_NexusOnlineDebug::UpdateSessionDisplay()

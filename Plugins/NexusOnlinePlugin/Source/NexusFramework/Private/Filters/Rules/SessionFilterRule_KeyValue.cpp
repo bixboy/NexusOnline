@@ -1,5 +1,6 @@
 #include "Filters/Rules/SessionFilterRule_KeyValue.h"
 
+
 void USessionFilterRule_KeyValue::ConfigureSearchSettings(FOnlineSessionSearch& SearchSettings) const
 {
     if (!bEnabled || !bApplyToSearchQuery || Key.IsNone())
@@ -13,7 +14,7 @@ void USessionFilterRule_KeyValue::ConfigureSearchSettings(FOnlineSessionSearch& 
 
     if (!Filter.ApplyToSearchSettings(SearchSettings))
     {
-    	UE_LOG(LogNexusOnlineFilter, Verbose, TEXT("[NexusOnline|Filter] Unable to apply key/value filter %s"), *GetRuleDescription());
+    	UE_LOG(LogTemp, Verbose, TEXT("[NexusOnline|Filter] Unable to apply key/value filter %s"), *GetRuleDescription());
     }
 }
 
@@ -31,7 +32,7 @@ bool USessionFilterRule_KeyValue::PassesFilter(const FOnlineSessionSearchResult&
     const bool bResult = Filter.MatchesResult(Result);
     if (!bResult)
     {
-    	UE_LOG(LogNexusOnlineFilter, VeryVerbose, TEXT("[NexusOnline|Filter] Result filtered by %s"), *GetRuleDescription());
+    	UE_LOG(LogTemp, VeryVerbose, TEXT("[NexusOnline|Filter] Result filtered by %s"), *GetRuleDescription());
     }
 
     return bResult;

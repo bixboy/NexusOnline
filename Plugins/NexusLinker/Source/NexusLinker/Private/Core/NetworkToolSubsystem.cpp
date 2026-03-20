@@ -1,4 +1,7 @@
 ﻿#include "Core/NetworkToolSubsystem.h"
+
+#if WITH_EDITOR
+
 #include "Core/NetworkToolSettings.h"
 #include "Editor.h"
 #include "Settings/LevelEditorPlaySettings.h"
@@ -9,15 +12,15 @@
 void UNetworkToolSubsystem::LaunchLocalCluster(int32 ClientCount, bool bRunDedicatedServer)
 {
     ULevelEditorPlaySettings* PlaySettings = GetMutableDefault<ULevelEditorPlaySettings>();
-    if (!PlaySettings) return;
+    if (!PlaySettings) 
+        return;
 
     // 1. Grid Calculation
     int32 DesktopWidth = 1920;
     int32 DesktopHeight = 1080;
     
     // Try to get actual screen size
-    if (FSlateApplication::Is
-Initialized()) // Check if SlateApplication is initialized before trying to get display metrics
+    if (FSlateApplication::IsInitialized())
     {
         FDisplayMetrics Metrics;
         FSlateApplication::Get().GetDisplayMetrics(Metrics);
@@ -28,17 +31,26 @@ Initialized()) // Check if SlateApplication is initialized before trying to get 
     int32 Rows = 1;
     int32 Cols = 1;
 
-    // determine grid (e.g. 2 -> 2x1, 3 -> 2x2, 4 -> 2x2)
-    if (ClientCount > 1) { Cols = 2; Rows = (ClientCount + 1) / 2; }
-    if (ClientCount > 4) { Cols = 3; Rows = (ClientCount + 2) / 3; }
+    if (ClientCount > 1)
+    {
+        Cols = 2;
+        Rows = (ClientCount + 1) / 2;
+    }
+    if (ClientCount > 4)
+    {
+        Cols = 3;
+        Rows = (ClientCount + 2) / 3;
+    }
 
     int32 WinW = DesktopWidth / Cols;
     int32 WinH = DesktopHeight / Rows;
 
     // Apply Settings
-    PlaySettings->SetPlayWindowWidth(WinW);
-    PlaySettings->SetPlayWindowHeight(WinH);
-    PlaySettings->SetPlayWindowPosition(FIntPoint(50, 50)); // Default Start Pos
+    PlaySettings->SetClientWindowSize(FIntPoint(WinW, WinH));
+    
+    // PlaySettings->SetPlayWindowWidth(WinW);
+    // PlaySettings->SetPlayWindowHeight(WinH);
+    // PlaySettings->SetPlayWindowPosition(FIntPoint(50, 50));
 
     // 2. Configuration du mode réseau
     if (bRunDedicatedServer)
@@ -204,3 +216,5 @@ void UNetworkToolSubsystem::SetNetworkEmulation(const FNetworkEmulationProfile& 
 
     UE_LOG(LogTemp, Warning, TEXT("[NetworkTool] Applied Lag: %dms, Loss: %d%%"), Profile.PktLag, Profile.PktLoss);
 }
+
+#endif

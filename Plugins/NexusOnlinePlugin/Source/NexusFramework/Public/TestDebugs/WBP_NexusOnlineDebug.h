@@ -7,6 +7,8 @@
 #include "WBP_NexusOnlineDebug.generated.h"
 
 
+class UNexusSessionConfig;
+
 UCLASS()
 class NEXUSFRAMEWORK_API UWBP_NexusOnlineDebug : public UUserWidget
 {
@@ -44,6 +46,9 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Nexus|Online")
 	bool IsLan = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Nexus|Online")
+	TObjectPtr<UNexusSessionConfig> SessionDebugConfig;
 
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;

@@ -13,20 +13,46 @@
 void UNexusMigrationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	
+	LastMigrationFailureTime = 0.0;
+
 	if (GEngine)
 	{
-		GEngine->OnNetworkFailure().AddUObject(this, &UNexusMigrationSubsystem::OnNetworkFailure);
+		GEngine->OnTravelFailure().AddUObject(this, &UNexusMigrationSubsystem::OnTravelFailure);
 	}
+
+	FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &UNexusMigrationSubsystem::OnMapLoadComplete);
 }
 
 void UNexusMigrationSubsystem::Deinitialize()
 {
 	if (GEngine)
 	{
-		GEngine->OnNetworkFailure().RemoveAll(this);
+		GEngine->OnTravelFailure().RemoveAll(this);
 	}
+    
+	FCoreUObjectDelegates::PostLoadMapWithWorld.RemoveAll(this);
 	
 	Super::Deinitialize();
+}
+
+void UNexusMigrationSubsystem::OnMapLoadComplete(UWorld* World)
+{
+	if (bRecoveringHost)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[NexusMigration] Map Loaded. Finishing Host Recovery (Creating Session)..."));
+		
+		if (World->GetNetDriver())
+		{
+			UE_LOG(LogTemp, Log, TEXT("[NexusMigration] NetDriver found. Creating Session..."));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NexusMigration] NetDriver NOT found immediately after load."));
+		}
+
+		FinishHostRecovery(World);
+	}
 }
 
 void UNexusMigrationSubsystem::CacheSessionSettings(const FSessionSettingsData& InSettings)
@@ -36,42 +62,111 @@ void UNexusMigrationSubsystem::CacheSessionSettings(const FSessionSettingsData& 
 	{
 		CachedSessionSettings.MigrationSessionID = NexusOnline::GenerateRandomSessionId(16);
 	}
+
+	bIntentionalLeave = false;
+	MigrationGeneration = 0;
+	CachedNextHostId.Empty();
 	
 	UE_LOG(LogTemp, Log, TEXT("[NexusMigration] Session cached. MigrationID: %s"), *CachedSessionSettings.MigrationSessionID);
 }
 
-void UNexusMigrationSubsystem::OnNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
+FString UNexusMigrationSubsystem::GetEffectiveMigrationId() const
 {
-	const UNexusMigrationConfig* Config = GetDefault<UNexusMigrationConfig>();
-	if (!Config || !Config->bEnableMigration)
-		return;
-
-	if (!CachedSessionSettings.bAllowHostMigration)
-		return;
+	if (MigrationGeneration == 0)
+	{
+		return CachedSessionSettings.MigrationSessionID;
+	}
 	
+	return FString::Printf(TEXT("%s_%d"), *CachedSessionSettings.MigrationSessionID, MigrationGeneration);
+}
+
+bool UNexusMigrationSubsystem::ShouldSuppressNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
+{
 	if (bIsMigrating)
-		return; 
+		return true;
 
 	if (bIntentionalLeave)
-	{
-		UE_LOG(LogTemp, Log, TEXT("[NexusMigration] Network Failure ignored due to Intentional Leave."));
-		return;
-	}
+		return true;
 
-	if (FailureType == ENetworkFailure::ConnectionLost || FailureType == ENetworkFailure::ConnectionTimeout)
+	if (HandleNetworkFailureMigration(World, NetDriver, FailureType, ErrorString))
+		return true;
+
+	return false;
+}
+
+void UNexusMigrationSubsystem::OnNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
+{
+	HandleNetworkFailureMigration(World, NetDriver, FailureType, ErrorString);
+}
+
+void UNexusMigrationSubsystem::OnTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& ErrorString)
+{
+	if (bIsMigrating)
 	{
-		if (World && World->GetNetMode() == NM_Client)
+		UE_LOG(LogTemp, Error, TEXT("[NexusMigration] Travel Failure during Migration: %s. Aborting Migration to prevent infinite loop."), *ErrorString);
+		bIsMigrating = false;
+		
+		LastMigrationFailureTime = FPlatformTime::Seconds();
+
+		if (const UNexusMigrationConfig* Config = GetDefault<UNexusMigrationConfig>())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[NexusMigration] Network Failure detected. Attempting Migration..."));
-			bIsMigrating = true;
-			HandleSessionRecovery();
+			if (!Config->MainMenuMap.IsEmpty())
+			{
+				UGameplayStatics::OpenLevel(World, FName(*Config->MainMenuMap));
+			}
 		}
 	}
 }
 
+
+bool UNexusMigrationSubsystem::HandleNetworkFailureMigration(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
+{
+	if (bIsMigrating)
+		return true;
+
+	const UNexusMigrationConfig* Config = GetDefault<UNexusMigrationConfig>();
+	if (!Config || !Config->bEnableMigration)
+		return false;
+
+	if (!CachedSessionSettings.bAllowHostMigration)
+		return false;
+	
+	if (bIsMigrating)
+		return true; 
+
+	if (bIntentionalLeave)
+		return false;
+
+	if (FailureType == ENetworkFailure::ConnectionLost || 
+		FailureType == ENetworkFailure::ConnectionTimeout || 
+		FailureType == ENetworkFailure::FailureReceived)
+	{
+		if (World && World->GetNetMode() == NM_Client)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[NexusMigration] Network Failure detected. Attempting Migration..."));
+			
+			const double CurrentTime = FPlatformTime::Seconds();
+			if ((CurrentTime - LastMigrationFailureTime) < 5.0)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[NexusMigration] Suppressing Migration Request due to recent failure (%.1f seconds ago)."), (CurrentTime - LastMigrationFailureTime));
+				return false;
+			}
+
+			bIsMigrating = true;
+			HandleSessionRecovery();
+			return true;
+		}
+	}
+	
+	return false;
+}
+
 void UNexusMigrationSubsystem::HandleSessionRecovery()
 {
-	bIntentionalLeave = false; // Reset for safety
+	bIntentionalLeave = false;
+	
+	MigrationGeneration++;
+	UE_LOG(LogTemp, Log, TEXT("[NexusMigration] Migration generation: %d. Effective ID: %s"), MigrationGeneration, *GetEffectiveMigrationId());
 
 	if (CachedNextHostId.IsEmpty())
 	{
@@ -88,6 +183,8 @@ void UNexusMigrationSubsystem::HandleSessionRecovery()
 			MyId = LocalId->ToString();
 		}
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("[NexusMigration] HandleSessionRecovery: MyID='%s', CachedNextHostID='%s'"), *MyId, *CachedNextHostId);
 
 	if (MyId == CachedNextHostId)
 	{
@@ -111,18 +208,35 @@ void UNexusMigrationSubsystem::StartHostRecovery()
 	{
 		SessionInt->DestroySession(NexusOnline::SessionTypeToName(CachedSessionSettings.SessionType));
 	}
+
+	const FString URL = FString::Printf(TEXT("%s?listen"), *CachedSessionSettings.MapName);
+	UE_LOG(LogTemp, Log, TEXT("[NexusMigration] StartHostRecovery. Traveling to Listen Server first: '%s'"), *URL);
+
+	UGameplayStatics::OpenLevel(GetWorld(), FName(*CachedSessionSettings.MapName), true, "listen");
 	
+	bRecoveringHost = true;
+
+	bRecoveringHost = true;
+	UGameplayStatics::OpenLevel(GetWorld(), FName(*CachedSessionSettings.MapName), true, "listen");
+}
+
+void UNexusMigrationSubsystem::FinishHostRecovery(UWorld* World)
+{
+	bRecoveringHost = false;
+
+	FString EffectiveId = GetEffectiveMigrationId();
+
 	FSessionSearchFilter MigrationFilter;
 	MigrationFilter.Key = FName("MIGRATION_ID_KEY");
 	MigrationFilter.Value.Type = ENexusSessionFilterValueType::String;
-	MigrationFilter.Value.StringValue = CachedSessionSettings.MigrationSessionID;
+	MigrationFilter.Value.StringValue = EffectiveId;
 
 	TArray<FSessionSearchFilter> ExtraSettings;
 	ExtraSettings.Add(MigrationFilter);
 
-	UE_LOG(LogTemp, Log, TEXT("[NexusMigration] StartHostRecovery. Map: %s, ID: %s"), *CachedSessionSettings.MapName, *CachedSessionSettings.MigrationSessionID);
+	UE_LOG(LogTemp, Log, TEXT("[NexusMigration] Creating Re-Hosted Session. EffectiveID: %s"), *EffectiveId);
 
-	CurrentCreateTask = UAsyncTask_CreateSession::CreateSession(GetWorld(), CachedSessionSettings, ExtraSettings, true, nullptr);
+	CurrentCreateTask = UAsyncTask_CreateSession::CreateSession(World, CachedSessionSettings, ExtraSettings, false, nullptr);
 
 	if (CurrentCreateTask)
 	{
@@ -157,10 +271,12 @@ void UNexusMigrationSubsystem::StartClientRecovery()
 
 void UNexusMigrationSubsystem::PerformClientSearch()
 {
+	FString EffectiveId = GetEffectiveMigrationId();
+
 	FSessionSearchFilter MigrationFilter;
 	MigrationFilter.Key = FName("MIGRATION_ID_KEY");
 	MigrationFilter.Value.Type = ENexusSessionFilterValueType::String;
-	MigrationFilter.Value.StringValue = CachedSessionSettings.MigrationSessionID;
+	MigrationFilter.Value.StringValue = EffectiveId;
 	MigrationFilter.ComparisonOp = ENexusSessionComparisonOp::Equals;
 
 	TArray<FSessionSearchFilter> SimpleFilters;
@@ -204,13 +320,20 @@ void UNexusMigrationSubsystem::OnRecoveryFindComplete(bool bWasSuccessful, const
 	else
 	{
 		MigrationRetries++;
-		// Use Config Variable
-		if (MigrationRetries >= MaxRetries)
+		if (MigrationRetries >= 20)
 		{
 			UE_LOG(LogTemp, Error, TEXT("[NexusMigration] Timeout after %d attempts."), MigrationRetries);
 			bIsMigrating = false;
+			LastMigrationFailureTime = FPlatformTime::Seconds();
 			OnMigrationFailed.Broadcast(TEXT("Migration Timed Out"));
-			UGameplayStatics::OpenLevel(GetWorld(), FName("MainMenu"));
+			
+			if (const UNexusMigrationConfig* ConfigTemp = GetDefault<UNexusMigrationConfig>())
+			{
+				if (!ConfigTemp->MainMenuMap.IsEmpty())
+				{
+					UGameplayStatics::OpenLevel(GetWorld(), FName(*ConfigTemp->MainMenuMap));
+				}
+			}
 			return;
 		}
 

@@ -12,7 +12,7 @@ struct FSessionSearchFilter;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindSessionsCompleted, bool, bWasSuccessful, const TArray<FOnlineSessionSearchResultData>&, Results);
 
 
-UCLASS()
+UCLASS(meta=(DisplayName="Find Sessions"))
 class NEXUSFRAMEWORK_API UAsyncTask_FindSessions : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()

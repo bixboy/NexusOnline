@@ -10,7 +10,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJoinSessionSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJoinSessionFailure);
 
 
-UCLASS()
+UCLASS(meta=(DisplayName="Join Session"))
 class NEXUSFRAMEWORK_API UAsyncTask_JoinSession : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()

@@ -37,17 +37,24 @@ public class NexusLinker : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"InputCore",
-			"UnrealEd",
-			"Slate",
-			"SlateCore",
-			"EditorSubsystem",
 			"HTTP",
 			"DeveloperSettings",
-			"WorkspaceMenuStructure",
-			"EditorStyle",
 			"Projects",
 			"Settings"
 		});
+
+		if (Target.bBuildEditor)
+		{
+			PublicDependencyModuleNames.AddRange(new string[]
+			{
+				"UnrealEd",
+				"Slate",
+				"SlateCore",
+				"EditorSubsystem",
+				"WorkspaceMenuStructure",
+				"EditorStyle"
+			});
+		}
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(

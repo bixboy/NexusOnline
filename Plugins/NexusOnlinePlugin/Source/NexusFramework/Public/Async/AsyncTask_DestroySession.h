@@ -7,7 +7,7 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSessionDestroyed);
 
-UCLASS()
+UCLASS(meta=(DisplayName="Destroy Session"))
 class NEXUSFRAMEWORK_API UAsyncTask_DestroySession : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()

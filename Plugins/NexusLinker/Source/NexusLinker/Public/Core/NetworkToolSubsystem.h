@@ -1,5 +1,8 @@
 ﻿#pragma once
 #include "CoreMinimal.h"
+
+#if WITH_EDITOR
+
 #include "EditorSubsystem.h"
 #include "NetworkToolTypes.h"
 #include "Interfaces/IHttpRequest.h"
@@ -34,3 +37,5 @@ private:
 	// Callback interne pour les réponses HTTP
 	void OnRemoteCommandComplete(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
 };
+
+#endif

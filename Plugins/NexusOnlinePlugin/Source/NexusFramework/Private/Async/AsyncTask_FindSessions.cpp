@@ -55,7 +55,7 @@ void UAsyncTask_FindSessions::Activate()
 {
 	if (!WorldContextObject)
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[FindSessions] Invalid WorldContextObject."));
+		UE_LOG(LogTemp, Error, TEXT("[FindSessions] Invalid WorldContextObject."));
 		OnCompleted.Broadcast(false, {});
 		return;
 	}
@@ -82,7 +82,7 @@ void UAsyncTask_FindSessions::Activate()
 
 	if (!PlayerID.IsValid())
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] Invalid Player UniqueNetId. Proceeding, but Steam/EOS might fail."));
+		UE_LOG(LogTemp, Warning, TEXT("[FindSessions] Invalid Player UniqueNetId. Proceeding, but Steam/EOS might fail."));
 	}
 
 	RebuildResolvedFilters();
@@ -97,7 +97,7 @@ void UAsyncTask_FindSessions::Activate()
 	const FName SubsystemName = Subsystem->GetSubsystemName();
 	if (SubsystemName == TEXT("NULL") && !SearchSettings->bIsLanQuery)
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] 'NULL' subsystem detected. Forcing LAN query."));
+		UE_LOG(LogTemp, Warning, TEXT("[FindSessions] 'NULL' subsystem detected. Forcing LAN query."));
 		SearchSettings->bIsLanQuery = true;
 	}
 
@@ -115,7 +115,7 @@ void UAsyncTask_FindSessions::Activate()
 		FOnFindSessionsCompleteDelegate::CreateUObject(this, &UAsyncTask_FindSessions::OnFindSessionsComplete)
 	);
 
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Searching... (Type: %s, Max: %d, LAN: %s)"),
+	UE_LOG(LogTemp, Log, TEXT("[FindSessions] Searching... (Type: %s, Max: %d, LAN: %s)"),
 		*NexusOnline::SessionTypeToName(DesiredType).ToString(),
 		SearchSettings->MaxSearchResults,
 		SearchSettings->bIsLanQuery ? TEXT("YES") : TEXT("NO"));
@@ -141,19 +141,19 @@ void UAsyncTask_FindSessions::OnFindSessionsComplete(bool bWasSuccessful)
 
 	if (!bWasSuccessful || !SearchSettings.IsValid())
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[FindSessions] Search failed or returned no results."));
+		UE_LOG(LogTemp, Warning, TEXT("[FindSessions] Search failed or returned no results."));
 		OnCompleted.Broadcast(false, {});
 		return;
 	}
 
 	if (SearchSettings->SearchResults.Num() == 0)
 	{
-		UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Search successful but found 0 sessions."));
+		UE_LOG(LogTemp, Log, TEXT("[FindSessions] Search successful but found 0 sessions."));
 		OnCompleted.Broadcast(true, {});
 		return;
 	}
 
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Raw results found: %d. Processing filters..."), SearchSettings->SearchResults.Num());
+	UE_LOG(LogTemp, Log, TEXT("[FindSessions] Raw results found: %d. Processing filters..."), SearchSettings->SearchResults.Num());
 	
 	ProcessSearchResults(SearchSettings->SearchResults);
 }
@@ -264,7 +264,7 @@ void UAsyncTask_FindSessions::ProcessSearchResults(const TArray<FOnlineSessionSe
 		FinalResults.Add(MoveTemp(Data));
 	}
 
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[FindSessions] Completed. %d sessions kept out of %d."), FinalResults.Num(), InResults.Num());
+	UE_LOG(LogTemp, Log, TEXT("[FindSessions] Completed. %d sessions kept out of %d."), FinalResults.Num(), InResults.Num());
 	OnCompleted.Broadcast(true, FinalResults);
 }
 

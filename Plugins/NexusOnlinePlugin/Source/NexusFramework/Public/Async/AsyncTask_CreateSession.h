@@ -9,7 +9,7 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSessionCreated);
 
-UCLASS()
+UCLASS(meta=(DisplayName="Create Session"))
 class NEXUSFRAMEWORK_API UAsyncTask_CreateSession : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()

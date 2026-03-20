@@ -7,9 +7,6 @@
 #include "SessionFilterPreset.generated.h"
 
 
-/**
- * Data asset Blueprint regroupant des filtres et règles avancées.
- */
 UCLASS(BlueprintType)
 class NEXUSFRAMEWORK_API USessionFilterPreset : public UDataAsset
 {
@@ -21,10 +18,10 @@ public:
 	TArray<FSessionSearchFilter> SimpleFilters;
 
 	/** Règles avancées instanciées. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Nexus|Online|Filter")
-	TArray<TObjectPtr<USessionFilterRule>> AdvancedRules;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Export, Category="Nexus|Online|Filter")
+	TArray<USessionFilterRule*> AdvancedRules;
 
 	/** Règles de tri à appliquer dans l'ordre de priorité. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Nexus|Online|Filter")
-	TArray<TObjectPtr<USessionSortRule>> SortRules;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Export, Category="Nexus|Online|Filter")
+	TArray<USessionSortRule*> SortRules;
 };

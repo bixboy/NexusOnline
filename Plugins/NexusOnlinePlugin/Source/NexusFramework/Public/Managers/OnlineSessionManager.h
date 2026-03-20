@@ -58,6 +58,9 @@ public:
 
     static AOnlineSessionManager* Spawn(UObject* WorldContextObject, FName InSessionName = NAME_GameSession);
 
+    UFUNCTION(BlueprintCallable, Category="Nexus|Online")
+    void RegisterLocalHost();
+
 protected:
     UFUNCTION()
     void OnRep_PlayerCount();
@@ -73,6 +76,12 @@ protected:
     FDelegateHandle RegisterPlayersHandle;
     FDelegateHandle UnregisterPlayersHandle;
     FTimerHandle TimerHandle_Refresh;
+    FTimerHandle TimerHandle_RetryRegister;
+    int32 RegisterHostRetries = 0;
+    static const int32 MAX_REGISTER_RETRIES = 10;
+
+    void TryRegisterHost();
+    bool GetHostUniqueId(FUniqueNetIdRepl& OutId) const;
 
     void RefreshPlayerCount();
     void BindSessionDelegates();
@@ -84,4 +93,6 @@ protected:
     void OnPlayersUnregistered(FName SessionName, const TArray<FUniqueNetIdRef>& Players, bool bWasSuccessful);
 
     FString GetPlayerNameFromId(const FUniqueNetId& PlayerId) const;
+
+    static TMap<TWeakObjectPtr<UWorld>, TWeakObjectPtr<AOnlineSessionManager>> CachedInstances;
 };

@@ -49,16 +49,16 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
     ENexusSessionFilterValueType Type = ENexusSessionFilterValueType::String;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session", meta=(EditCondition="Type==ENexusSessionFilterValueType::String"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
     FString StringValue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session", meta=(EditCondition="Type==ENexusSessionFilterValueType::Int32"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
     int32 IntValue = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session", meta=(EditCondition="Type==ENexusSessionFilterValueType::Float"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
     float FloatValue = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session", meta=(EditCondition="Type==ENexusSessionFilterValueType::Bool"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Nexus|Online|Session")
     bool bBoolValue = false;
 
     bool ToVariantData(FVariantData& OutData) const;
@@ -66,9 +66,7 @@ public:
     FString ToDebugString() const;
 };
 
-/**
- * Filtre simple configuré côté Blueprint, appliqué aux QuerySettings et en post-filtrage.
- */
+
 USTRUCT(BlueprintType)
 struct NEXUSFRAMEWORK_API FSessionSearchFilter
 {

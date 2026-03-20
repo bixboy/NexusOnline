@@ -26,4 +26,7 @@ public:
 
     UPROPERTY(Config, EditAnywhere, Category="Recovery", meta=(ClampMin=1.0f))
     float JoinFailureDelay;
+
+    UPROPERTY(Config, EditAnywhere, Category="General")
+    FString MainMenuMap = TEXT("TestMap");
 };

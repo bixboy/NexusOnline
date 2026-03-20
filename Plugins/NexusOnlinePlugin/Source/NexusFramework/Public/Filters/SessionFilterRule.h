@@ -7,14 +7,10 @@ class FOnlineSessionSearch;
 class FOnlineSessionSearchResult;
 
 
-DECLARE_LOG_CATEGORY_EXTERN(LogNexusOnlineFilter, Log, All);
-DECLARE_LOG_CATEGORY_EXTERN(LogNexusOnlineSort, Log, All);
-
-
 /**
  * Règle de filtrage complexe pouvant être héritée côté C++.
  */
-UCLASS(Abstract, Blueprintable, EditInlineNew, DefaultToInstanced)
+UCLASS(Abstract, Blueprintable, DefaultToInstanced, EditInlineNew)
 class NEXUSFRAMEWORK_API USessionFilterRule : public UObject
 {
     GENERATED_BODY()

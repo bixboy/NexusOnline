@@ -7,7 +7,7 @@
 /**
  * Règle de filtrage basée sur une paire clé/valeur.
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, EditInlineNew)
 class NEXUSFRAMEWORK_API USessionFilterRule_KeyValue : public USessionFilterRule
 {
     GENERATED_BODY()

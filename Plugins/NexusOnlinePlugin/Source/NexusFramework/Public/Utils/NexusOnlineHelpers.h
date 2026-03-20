@@ -16,7 +16,7 @@ namespace NexusOnline
 	//───────────────────────────────────────────────
 	// ID Generator
 	//───────────────────────────────────────────────
-	static FORCEINLINE FString GenerateRandomSessionId(int32 Length)
+	inline FString GenerateRandomSessionId(int32 Length)
 	{
 		static const FString Charset = TEXT("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
 		
@@ -34,7 +34,7 @@ namespace NexusOnline
 	//───────────────────────────────────────────────
 	// ENUM ↔ NAME Conversion
 	//───────────────────────────────────────────────
-	static FORCEINLINE FName SessionTypeToName(ENexusSessionType Type)
+	inline FName SessionTypeToName(ENexusSessionType Type)
 	{
 		switch (Type)
 		{
@@ -55,7 +55,7 @@ namespace NexusOnline
 		}
 	}
 
-	static FORCEINLINE ENexusSessionType NameToSessionType(const FName& Name)
+	inline ENexusSessionType NameToSessionType(const FName& Name)
 	{
 		if (Name == NAME_PartySession)
 			return ENexusSessionType::PartySession;
@@ -72,7 +72,7 @@ namespace NexusOnline
 	//───────────────────────────────────────────────
 	// Subsystem Access Helpers
 	//───────────────────────────────────────────────
-	static FORCEINLINE IOnlineSubsystem* GetSubsystem(UObject* WorldContextObject)
+	inline IOnlineSubsystem* GetSubsystem(UObject* WorldContextObject)
 	{
 		if (!WorldContextObject)
 			return nullptr;
@@ -81,7 +81,7 @@ namespace NexusOnline
 		return World ? Online::GetSubsystem(World) : nullptr;
 	}
 
-	static FORCEINLINE bool IsSubsystemAvailable(UObject* WorldContextObject)
+	inline bool IsSubsystemAvailable(UObject* WorldContextObject)
 	{
 		return (GetSubsystem(WorldContextObject) != nullptr);
 	}
@@ -89,7 +89,7 @@ namespace NexusOnline
 	//───────────────────────────────────────────────
 	// Interface Accessors
 	//───────────────────────────────────────────────
-	static FORCEINLINE IOnlineSessionPtr GetSessionInterface(UObject* WorldContextObject)
+	inline IOnlineSessionPtr GetSessionInterface(UObject* WorldContextObject)
 	{
 		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetSessionInterface();
@@ -97,7 +97,7 @@ namespace NexusOnline
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlineIdentityPtr GetIdentityInterface(UObject* WorldContextObject)
+	inline IOnlineIdentityPtr GetIdentityInterface(UObject* WorldContextObject)
 	{
 		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetIdentityInterface();
@@ -105,7 +105,7 @@ namespace NexusOnline
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlineFriendsPtr GetFriendsInterface(UObject* WorldContextObject)
+	inline IOnlineFriendsPtr GetFriendsInterface(UObject* WorldContextObject)
 	{
 		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetFriendsInterface();
@@ -113,7 +113,7 @@ namespace NexusOnline
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlineExternalUIPtr GetExternalUIInterface(UObject* WorldContextObject)
+	inline IOnlineExternalUIPtr GetExternalUIInterface(UObject* WorldContextObject)
 	{
 		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetExternalUIInterface();
@@ -121,7 +121,7 @@ namespace NexusOnline
 		return nullptr;
 	}
 
-	static FORCEINLINE IOnlinePresencePtr GetPresenceInterface(UObject* WorldContextObject)
+	inline IOnlinePresencePtr GetPresenceInterface(UObject* WorldContextObject)
 	{
 		if (IOnlineSubsystem* Subsystem = GetSubsystem(WorldContextObject))
 			return Subsystem->GetPresenceInterface();

@@ -4,7 +4,6 @@
 #include "Interfaces/OnlineSessionInterface.h"
 #include "Utils/NexusOnlineHelpers.h"
 #include "Data/SessionSearchFilter.h"
-#include "Filters/SessionFilterRule.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -34,7 +33,7 @@ void UAsyncTask_CreateSession::Activate()
 {
 	if (!WorldContextObject)
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] Invalid WorldContextObject."));
+		UE_LOG(LogTemp, Error, TEXT("[CreateSession] Invalid WorldContextObject."));
 		OnFailure.Broadcast();
 		return;
 	}
@@ -43,7 +42,7 @@ void UAsyncTask_CreateSession::Activate()
 	IOnlineSessionPtr Session = NexusOnline::GetSessionInterface(World);
 	if (!Session.IsValid())
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] Invalid Online Session Interface."));
+		UE_LOG(LogTemp, Error, TEXT("[CreateSession] Invalid Online Session Interface."));
 		OnFailure.Broadcast();
 		return;
 	}
@@ -53,7 +52,7 @@ void UAsyncTask_CreateSession::Activate()
 	// 1. VÉRIFICATION
 	if (Session->GetNamedSession(InternalSessionName))
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[CreateSession] Existing session '%s' found. Destroying asynchronously..."), *InternalSessionName.ToString());
+		UE_LOG(LogTemp, Warning, TEXT("[CreateSession] Existing session '%s' found. Destroying asynchronously..."), *InternalSessionName.ToString());
 
 		DestroyDelegateHandle = Session->AddOnDestroySessionCompleteDelegate_Handle(FOnDestroySessionCompleteDelegate::CreateUObject(this,
 			&UAsyncTask_CreateSession::OnOldSessionDestroyed));
@@ -86,12 +85,12 @@ void UAsyncTask_CreateSession::OnOldSessionDestroyed(FName SessionName, bool bWa
 
 	if (bWasSuccessful)
 	{
-		UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Old session destroyed. Proceeding to creation."));
+		UE_LOG(LogTemp, Log, TEXT("[CreateSession] Old session destroyed. Proceeding to creation."));
 		CreateSessionInternal();
 	}
 	else
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] Failed to destroy old session. Cannot create new one safely."));
+		UE_LOG(LogTemp, Error, TEXT("[CreateSession] Failed to destroy old session. Cannot create new one safely."));
 		OnFailure.Broadcast();
 	}
 }
@@ -119,7 +118,7 @@ void UAsyncTask_CreateSession::CreateSessionInternal()
 	
 	if (bIsNullSubsystem)
 	{
-		UE_LOG(LogNexusOnlineFilter, Warning, TEXT("[CreateSession] 'NULL' subsystem detected. Forcing LAN match."));
+		UE_LOG(LogTemp, Warning, TEXT("[CreateSession] 'NULL' subsystem detected. Forcing LAN match."));
 	}
 
 	const bool bIsLAN = bIsNullSubsystem ? true : Data.bIsLAN;
@@ -128,9 +127,12 @@ void UAsyncTask_CreateSession::CreateSessionInternal()
 	const int32 MaxPlayers = FMath::Max(1, Data.MaxPlayers);
 
 	Settings.bIsLANMatch = bIsLAN;
-	Settings.bUsesPresence = true;
+	Settings.bUsesPresence = Data.bUsesPresence;
 	Settings.bUseLobbiesIfAvailable = !bIsNullSubsystem; 
-	Settings.bAllowJoinInProgress = true;
+	Settings.bAllowJoinInProgress = Data.bAllowJoinInProgress;
+	Settings.bAntiCheatProtected = Data.bUseAntiCheat;
+	Settings.bIsDedicated = Data.bIsDedicated;
+	
 	Settings.NumPublicConnections = bIsPrivate ? 0 : MaxPlayers;
 	Settings.NumPrivateConnections = bIsPrivate ? MaxPlayers : 0;
 
@@ -149,8 +151,8 @@ void UAsyncTask_CreateSession::CreateSessionInternal()
 		Settings.Set(TEXT("ACCESS_TYPE"), FString("PUBLIC"), EOnlineDataAdvertisementType::ViaOnlineService);
 	}
 	Settings.bShouldAdvertise = !bIsPrivate;
-	Settings.bAllowJoinViaPresence = true;
-	Settings.bAllowInvites = true;
+	Settings.bAllowJoinViaPresence = Data.bUsesPresence;
+	Settings.bAllowInvites = Data.bAllowInvites;
 
 	// Metadata Optimisation (Ping vs Service)
 	const auto CosmeticType = bIsNullSubsystem ? EOnlineDataAdvertisementType::ViaOnlineService : EOnlineDataAdvertisementType::ViaOnlineServiceAndPing;
@@ -189,7 +191,7 @@ void UAsyncTask_CreateSession::CreateSessionInternal()
 	CreateDelegateHandle = Session->AddOnCreateSessionCompleteDelegate_Handle(FOnCreateSessionCompleteDelegate::CreateUObject(this,
 		&UAsyncTask_CreateSession::OnCreateSessionComplete));
 	
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Creating session '%s'..."), *InternalSessionName.ToString());
+	UE_LOG(LogTemp, Log, TEXT("[CreateSession] Creating session '%s'..."), *InternalSessionName.ToString());
 
 	if (!Session->CreateSession(0, InternalSessionName, Settings))
 	{
@@ -218,7 +220,7 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
 
 	if (!bWasSuccessful)
 	{
-		UE_LOG(LogNexusOnlineFilter, Error, TEXT("[CreateSession] Failed to create session."));
+		UE_LOG(LogTemp, Error, TEXT("[CreateSession] Failed to create session."));
 		OnFailure.Broadcast();
 		return;
 	}
@@ -228,7 +230,7 @@ void UAsyncTask_CreateSession::OnCreateSessionComplete(FName SessionName, bool b
 		Session->StartSession(SessionName);
 	}
 
-	UE_LOG(LogNexusOnlineFilter, Log, TEXT("[CreateSession] Success. AutoTravel = %s"), bShouldAutoTravel ? TEXT("TRUE") : TEXT("FALSE"));
+	UE_LOG(LogTemp, Log, TEXT("[CreateSession] Success. AutoTravel = %s"), bShouldAutoTravel ? TEXT("TRUE") : TEXT("FALSE"));
 	
 	OnSuccess.Broadcast();
 

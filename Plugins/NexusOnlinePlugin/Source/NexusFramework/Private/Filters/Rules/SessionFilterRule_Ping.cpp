@@ -10,7 +10,7 @@ bool USessionFilterRule_Ping::PassesFilter(const FOnlineSessionSearchResult& Res
     const bool bValid = Result.PingInMs <= MaxPing;
     if (!bValid)
     {
-        UE_LOG(LogNexusOnlineFilter, VeryVerbose, TEXT("[NexusOnline|Filter] Rejecting session with ping %d (max %d)"), Result.PingInMs, MaxPing);
+        UE_LOG(LogTemp, VeryVerbose, TEXT("[NexusOnline|Filter] Rejecting session with ping %d (max %d)"), Result.PingInMs, MaxPing);
     }
 
     return bValid;

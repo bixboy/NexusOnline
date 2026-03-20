@@ -6,7 +6,7 @@
 /**
  * Règle de tri par ping (croissant ou décroissant).
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, EditInlineNew)
 class NEXUSFRAMEWORK_API USessionSortRule_Ping : public USessionSortRule
 {
         GENERATED_BODY()

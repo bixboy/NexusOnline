@@ -28,6 +28,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Nexus|Migration")
 	bool IsMigrating() const { return bIsMigrating; }
 
+	/** Returns true if the network failure should be ignored (e.g. during migration). */
+	UFUNCTION(BlueprintCallable, Category = "Nexus|Migration")
+	bool ShouldSuppressNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
+
 	UPROPERTY(BlueprintAssignable, Category="Nexus|Migration")
 	FOnMigrationStarted OnMigrationStarted;
 
@@ -40,7 +44,9 @@ protected:
 
 	FString CachedNextHostId;
 	bool bIsMigrating = false;
+	bool bRecoveringHost = false; // Pending Host Recovery State
 	bool bIntentionalLeave = false;
+	int32 MigrationGeneration = 0;
 
 public:
 	UFUNCTION(BlueprintCallable, Category="Nexus|Migration")
@@ -50,6 +56,11 @@ protected:
 
 	int32 MigrationRetries = 0;
 
+	FString GetEffectiveMigrationId() const;
+    
+    // Timestamp of the last migration failure (Travel or Network) to prevent loops
+    double LastMigrationFailureTime = 0.0;
+    
 	UPROPERTY()
 	UAsyncTask_CreateSession* CurrentCreateTask;
 
@@ -59,9 +70,14 @@ protected:
 	UPROPERTY()
 	UAsyncTask_JoinSession* CurrentJoinTask;
 
+public:
 	void OnNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
+	void OnTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& ErrorString);
+	bool HandleNetworkFailureMigration(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
 	void HandleSessionRecovery();
 	void StartHostRecovery();
+	void FinishHostRecovery(UWorld* World);
+	void OnMapLoadComplete(UWorld* World);
 	
 	void StartClientRecovery();
 	void PerformClientSearch();

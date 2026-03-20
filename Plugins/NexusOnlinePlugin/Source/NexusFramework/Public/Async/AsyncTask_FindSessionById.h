@@ -7,10 +7,8 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindSessionByIdCompleted, bool, bWasSuccessful, FOnlineSessionSearchResultData, Result);
 
-/**
- * 🔍 Find a session using its unique Session ID .
- */
-UCLASS()
+
+UCLASS(meta=(DisplayName="Find Session By ID"))
 class NEXUSFRAMEWORK_API UAsyncTask_FindSessionById : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()

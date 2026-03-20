@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "CoreMinimal.h"
+
 #include "NetworkToolTypes.generated.h"
 
 
@@ -40,7 +41,7 @@ struct FServerProfile
 	// Pour l'API HTTP (Start/Stop)
 	UPROPERTY(EditAnywhere, Category = "Remote Control")
 	FString ApiUrl_Start; 
-
+	
 	UPROPERTY(EditAnywhere, Category = "Remote Control")
 	FString ApiUrl_Stop;
     
@@ -63,3 +64,4 @@ struct FNetworkEmulationProfile
 	UPROPERTY(EditAnywhere)
 	int32 PktLoss = 0; // en %
 };
+

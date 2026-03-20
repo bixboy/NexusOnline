@@ -6,7 +6,7 @@
 /**
  * Règle de filtrage basée sur le ping maximum.
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, EditInlineNew)
 class NEXUSFRAMEWORK_API USessionFilterRule_Ping : public USessionFilterRule
 {
         GENERATED_BODY()

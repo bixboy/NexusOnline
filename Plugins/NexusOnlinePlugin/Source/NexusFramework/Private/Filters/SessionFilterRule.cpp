@@ -2,8 +2,6 @@
 
 #include "OnlineSessionSettings.h"
 
-DEFINE_LOG_CATEGORY(LogNexusOnlineFilter);
-DEFINE_LOG_CATEGORY(LogNexusOnlineSort);
 
 void USessionFilterRule::ConfigureSearchSettings(FOnlineSessionSearch& SearchSettings) const
 {

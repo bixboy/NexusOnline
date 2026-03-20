@@ -1,11 +1,11 @@
-﻿#pragma once
+#pragma once
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "OnlineSubsystem.h"
 #include "Interfaces/OnlineFriendsInterface.h"
 #include "Interfaces/OnlinePresenceInterface.h"
 #include "Interfaces/OnlineExternalUIInterface.h"
-#include "NexusSteamUtils.generated.h" // Toujours en dernier
+#include "NexusSteamUtils.generated.h"
 
 class IOnlineSubsystem;
 
@@ -39,13 +39,13 @@ struct FSteamFriendInfo
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSteamFriendsLoaded, bool, bSuccess, const TArray<FSteamFriendInfo>&, FriendsList);
 
 UCLASS()
-class NEXUSFRAMEWORK_API UNexusSteamUtils : public UBlueprintFunctionLibrary
+class NEXUSSTEAM_API UNexusSteamUtils : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 
 public:
 	// ────────────────────────────────────────────────
-	// Identité
+	// Identity
 	// ────────────────────────────────────────────────
 
 	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
@@ -55,7 +55,7 @@ public:
 	static FString GetLocalSteamID(UObject* WorldContextObject, int32 UserIndex = 0);
 
 	// ────────────────────────────────────────────────
-	// Amis
+	// Friends
 	// ────────────────────────────────────────────────
 	
 	UFUNCTION(BlueprintCallable, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
@@ -78,7 +78,7 @@ public:
 	static bool ShowProfileOverlay(UObject* WorldContextObject, const FUniqueNetIdRepl& PlayerId, int32 UserIndex = 0);
 
 	// ────────────────────────────────────────────────
-	// État & Presence
+	// State & Presence
 	// ────────────────────────────────────────────────
 
 	UFUNCTION(BlueprintPure, Category="Nexus|Steam", meta=(WorldContext="WorldContextObject"))
